@@ -22,6 +22,10 @@ jobs:
             args: "--target universal-apple-darwin"
           - platform: ubuntu-22.04
             args: ""
+          # Covers Linux users running this on ARM SBCs (Raspberry Pi and similar) — a real
+          # audience for a tool that talks to hardware over serial.
+          - platform: ubuntu-22.04-arm
+            args: ""
 
     runs-on: ${{ matrix.platform }}
 
@@ -29,7 +33,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Linux system dependencies
-        if: matrix.platform == 'ubuntu-22.04'
+        if: startsWith(matrix.platform, 'ubuntu-22.04')
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -81,3 +85,24 @@ jobs:
           prerelease: false
           includeUpdaterJson: false
           args: ${{ matrix.args }}
+
+      # "Portable" build for people who don't want to install anything: the app is a single
+      # self-contained .exe (WebView2Loader is statically linked, and there's no
+      # `bundle.resources` in tauri.conf.json for it to depend on), confirmed by launching it
+      # from an empty directory with nothing else next to it — so the zip only needs to contain
+      # that one file, nothing more.
+      - name: Package portable build
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          $zipName = "pn532-toolkit_${version}_x64_portable.zip"
+          Compress-Archive -Path "src-tauri/target/release/pn532-toolkit.exe" -DestinationPath $zipName
+          echo "PORTABLE_ZIP=$zipName" >> $env:GITHUB_ENV
+
+      - name: Upload portable build to the release
+        if: matrix.platform == 'windows-latest'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" "$env:PORTABLE_ZIP" --clobber
+        shell: pwsh

@@ -11,7 +11,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [windows-latest, macos-latest, ubuntu-22.04]
+        # ubuntu-22.04-arm covers Linux users running this on ARM SBCs (Raspberry Pi and
+        # similar) — a real audience for a tool that talks to hardware over serial.
+        platform: [windows-latest, macos-latest, ubuntu-22.04, ubuntu-22.04-arm]
 
     runs-on: ${{ matrix.platform }}
 
@@ -19,9 +21,9 @@ jobs:
       - uses: actions/checkout@v4
 
       # Tauri's Linux backend (webkit2gtk, appindicator, dbus, ...) needs system libraries that
-      # aren't preinstalled on the Ubuntu runner image.
+      # aren't preinstalled on the Ubuntu runner image. Matches both the x64 and arm64 runners.
       - name: Install Linux system dependencies
-        if: matrix.platform == 'ubuntu-22.04'
+        if: startsWith(matrix.platform, 'ubuntu-22.04')
         run: |
           sudo apt-get update
           sudo apt-get install -y \
