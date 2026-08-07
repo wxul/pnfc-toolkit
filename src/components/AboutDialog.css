@@ -1,0 +1,89 @@
+.about-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+}
+
+.about-dialog {
+  --ad-bg: #ffffff;
+  --ad-text: #1a1a1a;
+  --ad-text-dim: #767676;
+  --ad-border: #dcdcdc;
+
+  position: relative;
+  width: min(320px, 88vw);
+  background: var(--ad-bg);
+  color: var(--ad-text);
+  border: 1px solid var(--ad-border);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  padding: 1.6rem 1.4rem 1.3rem;
+  text-align: center;
+}
+
+@media (prefers-color-scheme: dark) {
+  .about-dialog {
+    --ad-bg: #1e1e1e;
+    --ad-text: #e8e8e8;
+    --ad-text-dim: #9a9a9a;
+    --ad-border: #3a3a3a;
+  }
+}
+
+.about-close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: var(--ad-text-dim);
+  font-size: 0.9rem;
+  padding: 0.2rem 0.5rem;
+}
+
+.about-close:hover {
+  color: var(--ad-text);
+  border-color: transparent;
+}
+
+.about-icon {
+  font-size: 2.4rem;
+  line-height: 1;
+  margin-bottom: 0.4rem;
+}
+
+.about-dialog h2 {
+  margin: 0 0 0.2rem;
+  font-size: 1.1rem;
+}
+
+.about-desc {
+  margin: 0 0 1rem;
+  color: var(--ad-text-dim);
+  font-size: 0.85rem;
+}
+
+.about-meta {
+  display: grid;
+  grid-template-columns: auto auto;
+  justify-content: center;
+  gap: 0.2rem 0.8rem;
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.about-meta dt {
+  color: var(--ad-text-dim);
+  text-align: right;
+}
+
+.about-meta dd {
+  margin: 0;
+  text-align: left;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
