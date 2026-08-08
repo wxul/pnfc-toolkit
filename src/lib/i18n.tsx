@@ -5,7 +5,7 @@ export type Locale = "zh" | "en";
 type Params = Record<string, string | number>;
 type Entry = string | ((params: Params) => string);
 
-const STORAGE_KEY = "pn532-toolkit:locale";
+const STORAGE_KEY = "pnfc-toolkit:locale";
 
 /**
  * Every translated string in the app lives in this one dictionary, keyed by a dotted namespace
@@ -17,7 +17,7 @@ const STORAGE_KEY = "pn532-toolkit:locale";
  * functions taking a `params` object instead.
  */
 const en = {
-  "titleBar.appName": "pn532-toolkit",
+  "titleBar.appName": "pnfc-toolkit",
   "titleBar.minimize": "Minimize",
   "titleBar.maximize": "Maximize",
   "titleBar.restore": "Restore",
@@ -28,6 +28,7 @@ const en = {
   "nav.device": "Device",
   "nav.read": "Read",
   "nav.write": "Write",
+  "nav.other": "Other",
   "nav.settings": "Settings",
   "settings.comingSoonTitle": "Settings",
   "settings.comingSoonDescription": "App preferences are coming soon",
@@ -49,12 +50,25 @@ const en = {
   "device.disconnect": "Disconnect",
   "device.chipPn532": "PN532",
   "device.chipUnknown": (p) => `Unknown (0x${p.ic})`,
+  "device.supportedTypesTitle": "Supported NFC tag types",
+  "device.supportedTypeNtag": "NTAG21x / MIFARE Ultralight — read, write, password protection",
+  "device.supportedTypeClassic": "MIFARE Classic 1K/4K/Mini — read, sector copy",
+  "device.supportedTypesHint":
+    "This is a software limitation, not a hardware one — the PN532 chip itself may be able to talk to other card types (ISO14443-4 smart cards, FeliCa, ISO15693, ...), this app just doesn't implement handling for them yet.",
 
   "common.clear": "Clear",
   "common.unknown": "Unknown",
 
   "readCard.connectFirst": 'Please connect a PN532 on the "Device" page first',
+  "readCard.idleHint": 'Click "Start reading", then bring a card near the reader.',
+  "readCard.startRead": "Start reading",
   "readCard.waitingForCard": "Bring a card near the reader...",
+  "readCard.dumpCardGone":
+    "The card was lifted before the read finished — retrying automatically once it's back on the reader.",
+  "readCard.saveData": "Save data",
+  "readCard.savedFeedback": "Saved",
+  "readCard.unsupportedModel": (p) =>
+    `Unsupported card model (SAK=0x${p.sak}) — this app only supports NTAG21x/MIFARE Ultralight and MIFARE Classic. Even if the PN532 hardware itself can talk to this card, this app's software hasn't implemented handling for it.`,
   "readCard.tagInfo": "Tag info",
   "readCard.fieldManufacturer": "Manufacturer",
   "readCard.fieldType": "Type",
@@ -67,7 +81,6 @@ const en = {
   "readCard.fieldDataFormat": "Data format",
   "readCard.fieldSize": "Size",
   "readCard.fieldWritable": "Writable",
-  "readCard.fieldCanBeReadOnly": "Can be made read-only",
   "readCard.fieldPasswordProtection": "Password protection",
   "readCard.passwordEnabled": (p) => `Enabled (AUTH0 = 0x${p.auth0})`,
   "readCard.passwordDisabled": (p) => `Disabled (AUTH0 = 0x${p.auth0})`,
@@ -122,22 +135,6 @@ const en = {
   "common.cancel": "Cancel",
   "common.processing": "Working...",
 
-  "pwdProtect.notRecognized": "Couldn't identify this tag's specific model; password protection isn't supported yet",
-  "pwdProtect.changePassword": "Change password",
-  "pwdProtect.removeProtection": "Remove protection",
-  "pwdProtect.setProtection": "Set up password protection",
-  "pwdProtect.removeTitle": "Remove password protection",
-  "pwdProtect.currentPasswordPlaceholder": "Current password (8 hex digits)",
-  "pwdProtect.confirmRemove": "Confirm removal",
-  "pwdProtect.protectionExplanation":
-    "The password only protects writes — this card can still be read normally. Once set, any future change to this card (including changing the password again, or removing protection) will require this password. There's no recovery method for the tag itself — if you forget the password, this card will be permanently unwritable, so be sure to write the password down now.",
-  "pwdProtect.newPasswordPlaceholder": "New password (8 hex digits)",
-  "pwdProtect.generateRandom": "Generate random password",
-  "pwdProtect.confirmNewPasswordPlaceholder": "Re-enter the new password to confirm you got it right",
-  "pwdProtect.acknowledgeCheckbox": "I've written this password down",
-  "pwdProtect.confirmChange": "Confirm change",
-  "pwdProtect.confirmSet": "Confirm setup",
-
   "common.delete": "Delete",
 
   "write.kindUrl": "URL",
@@ -179,14 +176,53 @@ const en = {
   "write.addRecord": "+ Add a record",
   "write.deleteRecord": "Delete",
   "write.writingInProgress": (p) => `Writing to ${p.uid}, keep the card held against the reader...`,
-  "write.confirmOverwrite": (p) =>
-    `Writing will overwrite this card's existing NDEF data with ${p.count} record(s) — continue?`,
-  "write.passwordPlaceholder": "This card has write-password protection enabled — enter the password (8 hex digits)",
-  "write.confirmWrite": "Confirm write",
   "write.writeButton": "Write",
-  "write.writeCountSuffix": (p) => ` (${p.count} records)`,
   "write.writeSuccess": "Write succeeded",
-  "write.unsupportedCardType": (p) => `The current card is ${p.type}; writing is currently only supported for the Ultralight/NTAG family`,
+
+  "write.modeSingle": "Single card",
+  "write.modeContinuous": "Continuous",
+  "write.startContinuous": "Start continuous writing",
+  "write.overwriteWarning":
+    "Placing a card on the reader will immediately overwrite its NDEF data with the content above — make sure it's correct first.",
+  "write.sharedPasswordPlaceholder": "Password for protected cards, if any (optional, 8 hex digits)",
+  "write.stop": "Stop",
+  "write.waitingForCard": "Waiting for a card...",
+  "write.classicNotSupported": "Skipped: writing isn't supported for MIFARE Classic cards (only NTAG21x/MIFARE Ultralight)",
+  "write.unsupportedModel": "Skipped: unsupported card model — this app only supports NTAG21x/MIFARE Ultralight and MIFARE Classic",
+  "write.passwordRequired": "Skipped: this card is password-protected, but no valid password was entered",
+  "write.checkFailed": "Failed to check password protection status",
+  "write.successCount": (p) => `${p.count} succeeded`,
+  "write.errorCount": (p) => `${p.count} failed`,
+  "write.clearLog": "Clear log",
+
+  "pwdTool.intro":
+    "Quickly set or remove write-password protection on an NTAG/Ultralight card without reading it first — pick the password, then bring a card near the reader.",
+  "pwdTool.modeText": "Text",
+  "pwdTool.modeHex": "Hex",
+  "pwdTool.textPlaceholder": "Password text",
+  "pwdTool.hexPlaceholder": "8 hex digits",
+  "pwdTool.previewLabel": "Will be written as",
+  "pwdTool.truncateHint":
+    "Text is UTF-8 encoded and fit into the 4 bytes NTAG's password uses — anything past the first 4 bytes is dropped, and it's zero-padded if shorter.",
+  "pwdTool.setAndWait": "Set password, then wait for a card",
+  "pwdTool.clearAndWait": "Remove password, then wait for a card",
+  "pwdTool.waitingToSet": "Bring an NTAG card near the reader to set its password...",
+  "pwdTool.waitingToClear": "Bring an NTAG card near the reader to remove its password...",
+  "pwdTool.classicNotSupported": "Skipped: password protection isn't supported for MIFARE Classic cards (only NTAG21x/MIFARE Ultralight)",
+  "pwdTool.unsupportedModel": "Skipped: unsupported card model — this app only supports NTAG21x/MIFARE Ultralight and MIFARE Classic",
+  "pwdTool.setSuccess": "Password set successfully",
+  "pwdTool.clearSuccess": "Password removed successfully",
+  "pwdTool.startOver": "Start over",
+
+  "other.intro": "Standalone single-purpose tools for the current card.",
+  "other.back": "Back",
+  "other.toolPasswordTitle": "Password tool",
+  "other.toolPasswordDesc": "Set or remove NTAG/Ultralight write-password protection without reading the card first.",
+  "other.toolSavedTitle": "Saved data",
+  "other.toolSavedDesc": "Browse NTAG/Ultralight reads saved from the read page.",
+
+  "savedCards.empty": "Nothing saved yet — use \"Save data\" on the read page after reading an NTAG card.",
+  "savedCards.write": "Write",
 
   "about.close": "Close",
   "about.description": "PN532 NFC debugging and operation tool",
@@ -196,7 +232,7 @@ const en = {
 export type TranslationKey = keyof typeof en;
 
 const zh: Record<TranslationKey, Entry> = {
-  "titleBar.appName": "pn532-toolkit",
+  "titleBar.appName": "pnfc-toolkit",
   "titleBar.minimize": "最小化",
   "titleBar.maximize": "最大化",
   "titleBar.restore": "还原",
@@ -207,6 +243,7 @@ const zh: Record<TranslationKey, Entry> = {
   "nav.device": "设备",
   "nav.read": "读卡",
   "nav.write": "写入",
+  "nav.other": "其它",
   "nav.settings": "设置",
   "settings.comingSoonTitle": "设置",
   "settings.comingSoonDescription": "应用偏好设置即将上线",
@@ -228,12 +265,24 @@ const zh: Record<TranslationKey, Entry> = {
   "device.disconnect": "断开连接",
   "device.chipPn532": "PN532",
   "device.chipUnknown": (p) => `未知 (0x${p.ic})`,
+  "device.supportedTypesTitle": "支持的 NFC 标签类型",
+  "device.supportedTypeNtag": "NTAG21x / MIFARE Ultralight —— 读取、写入、密码保护",
+  "device.supportedTypeClassic": "MIFARE Classic 1K/4K/Mini —— 读取、按扇区复制",
+  "device.supportedTypesHint":
+    "这是软件层面的限制，不是硬件限制——PN532 芯片本身可能还能跟其它类型的卡通信（比如 ISO14443-4 智能卡、FeliCa、ISO15693 等），只是这个应用软件还没实现对它们的处理。",
 
   "common.clear": "清除",
   "common.unknown": "未知",
 
   "readCard.connectFirst": "请先在“设备”页连接 PN532",
+  "readCard.idleHint": "点击“开始读取”，然后将卡片靠近读卡器。",
+  "readCard.startRead": "开始读取",
   "readCard.waitingForCard": "请将卡片靠近读卡器...",
+  "readCard.dumpCardGone": "读取还没完成卡就被拿开了，重新放上后会自动重试。",
+  "readCard.saveData": "保存数据",
+  "readCard.savedFeedback": "已保存",
+  "readCard.unsupportedModel": (p) =>
+    `不支持的卡片型号（SAK=0x${p.sak}）——本应用目前只支持 NTAG21x/MIFARE Ultralight 和 MIFARE Classic。即便 PN532 硬件本身能跟这张卡通信，软件这边还没实现对它的处理。`,
   "readCard.tagInfo": "标签信息",
   "readCard.fieldManufacturer": "厂商",
   "readCard.fieldType": "类型",
@@ -246,7 +295,6 @@ const zh: Record<TranslationKey, Entry> = {
   "readCard.fieldDataFormat": "数据格式",
   "readCard.fieldSize": "大小",
   "readCard.fieldWritable": "可写",
-  "readCard.fieldCanBeReadOnly": "可为只读",
   "readCard.fieldPasswordProtection": "密码保护",
   "readCard.passwordEnabled": (p) => `已启用（AUTH0 = 0x${p.auth0}）`,
   "readCard.passwordDisabled": (p) => `未启用（AUTH0 = 0x${p.auth0}）`,
@@ -298,22 +346,6 @@ const zh: Record<TranslationKey, Entry> = {
   "common.cancel": "取消",
   "common.processing": "处理中...",
 
-  "pwdProtect.notRecognized": "无法识别这张标签的具体型号，暂不支持设置密码保护",
-  "pwdProtect.changePassword": "修改密码",
-  "pwdProtect.removeProtection": "取消保护",
-  "pwdProtect.setProtection": "设置密码保护",
-  "pwdProtect.removeTitle": "取消密码保护",
-  "pwdProtect.currentPasswordPlaceholder": "当前密码（8 位十六进制）",
-  "pwdProtect.confirmRemove": "确认取消保护",
-  "pwdProtect.protectionExplanation":
-    "密码只保护写入，这张卡仍然可以正常读取；设置后，之后修改这张卡（包括再次改密码、取消保护）都需要提供这个密码。标签本身不提供找回方式，忘记密码这张卡将永久无法再写入，请务必现在就把密码记下来。",
-  "pwdProtect.newPasswordPlaceholder": "新密码（8 位十六进制）",
-  "pwdProtect.generateRandom": "生成随机密码",
-  "pwdProtect.confirmNewPasswordPlaceholder": "再输入一次新密码，确认没有记错",
-  "pwdProtect.acknowledgeCheckbox": "我已经把这个密码记下来了",
-  "pwdProtect.confirmChange": "确认修改",
-  "pwdProtect.confirmSet": "确认设置",
-
   "common.delete": "删除",
 
   "write.kindUrl": "URL",
@@ -355,13 +387,50 @@ const zh: Record<TranslationKey, Entry> = {
   "write.addRecord": "+ 添加一条记录",
   "write.deleteRecord": "删除",
   "write.writingInProgress": (p) => `正在写入 ${p.uid}，请保持卡片贴紧读卡器...`,
-  "write.confirmOverwrite": (p) => `写入会覆盖这张卡上原有的 NDEF 数据，将写入 ${p.count} 条记录，确认继续吗？`,
-  "write.passwordPlaceholder": "这张卡启用了写密码保护，请输入密码（8 位十六进制）",
-  "write.confirmWrite": "确认写入",
   "write.writeButton": "写入",
-  "write.writeCountSuffix": (p) => `（共 ${p.count} 条）`,
   "write.writeSuccess": "写入成功",
-  "write.unsupportedCardType": (p) => `当前卡片是 ${p.type}，写入功能目前只支持 Ultralight/NTAG 系列`,
+
+  "write.modeSingle": "单张写入",
+  "write.modeContinuous": "连续写入",
+  "write.startContinuous": "开始连续写入",
+  "write.overwriteWarning": "把卡片放上读卡器后会立即用上面的内容覆盖写入 NDEF 数据，请先确认内容无误。",
+  "write.sharedPasswordPlaceholder": "如果卡片有密码保护，填写密码（可选，8 位十六进制）",
+  "write.stop": "停止",
+  "write.waitingForCard": "等待卡片中...",
+  "write.classicNotSupported": "已跳过：写入功能暂不支持 MIFARE Classic 卡片（仅支持 NTAG21x/MIFARE Ultralight）",
+  "write.unsupportedModel": "已跳过：不支持的卡片型号——本应用只支持 NTAG21x/MIFARE Ultralight 和 MIFARE Classic",
+  "write.passwordRequired": "已跳过：这张卡启用了密码保护，但未输入有效密码",
+  "write.checkFailed": "检查密码保护状态失败",
+  "write.successCount": (p) => `成功 ${p.count} 张`,
+  "write.errorCount": (p) => `失败 ${p.count} 张`,
+  "write.clearLog": "清空记录",
+
+  "pwdTool.intro": "无需先读卡，直接给一张 NTAG/Ultralight 卡快速设置或删除写密码保护——先选好密码，再把卡靠近读卡器。",
+  "pwdTool.modeText": "文本",
+  "pwdTool.modeHex": "十六进制",
+  "pwdTool.textPlaceholder": "密码文本",
+  "pwdTool.hexPlaceholder": "8 位十六进制",
+  "pwdTool.previewLabel": "实际写入",
+  "pwdTool.truncateHint": "文本会按 UTF-8 编码后截取前 4 个字节（NTAG 密码固定 4 字节），不足 4 字节则用 0 补齐。",
+  "pwdTool.setAndWait": "设置密码并等待读卡",
+  "pwdTool.clearAndWait": "删除密码并等待读卡",
+  "pwdTool.waitingToSet": "请将 NTAG 卡靠近读卡器以设置密码...",
+  "pwdTool.waitingToClear": "请将 NTAG 卡靠近读卡器以删除密码...",
+  "pwdTool.classicNotSupported": "已跳过：密码保护功能暂不支持 MIFARE Classic 卡片（仅支持 NTAG21x/MIFARE Ultralight）",
+  "pwdTool.unsupportedModel": "已跳过：不支持的卡片型号——本应用只支持 NTAG21x/MIFARE Ultralight 和 MIFARE Classic",
+  "pwdTool.setSuccess": "密码设置成功",
+  "pwdTool.clearSuccess": "密码已删除",
+  "pwdTool.startOver": "重新开始",
+
+  "other.intro": "针对当前卡片的独立单一功能小工具。",
+  "other.back": "返回",
+  "other.toolPasswordTitle": "密码工具",
+  "other.toolPasswordDesc": "无需先读卡，直接设置或删除 NTAG/Ultralight 的写密码保护。",
+  "other.toolSavedTitle": "已保存数据",
+  "other.toolSavedDesc": "查看读卡页保存下来的 NTAG/Ultralight 读取结果。",
+
+  "savedCards.empty": "还没有保存过任何数据——在读卡页读完一张 NTAG 卡后点“保存数据”。",
+  "savedCards.write": "写入",
 
   "about.close": "关闭",
   "about.description": "PN532 NFC 调试与操作工具",

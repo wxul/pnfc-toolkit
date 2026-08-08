@@ -1,10 +1,12 @@
-# pn532-toolkit
+# pnfc-toolkit
 
-基于 PN532 模块、通过串口（UART）连接的跨平台 NFC 标签读写/查看工具，用 Tauri 2 + React + Rust 构建。
+跨平台 NFC 标签读写/查看工具，用 Tauri 2 + React + Rust 构建。
+
+目前是围绕 **PN532** 模块、通过串口（UART）连接实现的——未来可能会加入对其它 NFC 控制器芯片（比如 PN7160）的支持。
 
 [English](README.md)
 
-![pn532-toolkit 截图](assets/screenshot.png)
+![pnfc-toolkit 截图](assets/screenshot.png)
 
 ## 平台支持情况
 

@@ -2536,7 +2536,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pn532-toolkit"
+name = "pnfc-toolkit"
 version = "0.1.0"
 dependencies = [
  "hex",

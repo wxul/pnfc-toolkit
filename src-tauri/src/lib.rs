@@ -1,8 +1,8 @@
 mod pn532;
 
-use pn532::session::{
-    CardInfo, ClassicCopyResult, ClassicSectorInfo, MemoryDump, PasswordProtection, SessionSlot,
-};
+use pn532::session::{CardInfo, SessionSlot};
+use pn532::tags::mifare_classic::{ClassicCopyResult, ClassicSectorData, ClassicSectorInfo};
+use pn532::tags::ntag21x::{MemoryDump, NdefRecordRequest, PasswordProtection};
 use pn532::{Pn532Info, SerialPortSummary};
 use std::time::Duration;
 
@@ -134,7 +134,7 @@ async fn dump_card_memory(
     session: tauri::State<'_, SessionSlot>,
 ) -> Result<Option<MemoryDump>, String> {
     let current = pn532::session::current_session(&session);
-    run_blocking(move || pn532::session::dump_memory(&current))
+    run_blocking(move || pn532::tags::ntag21x::dump_memory(&current))
         .await?
         .map_err(|e| e.to_string())
 }
@@ -148,13 +148,13 @@ async fn dump_card_memory(
 #[tauri::command]
 async fn write_ndef(
     session: tauri::State<'_, SessionSlot>,
-    records: Vec<pn532::session::NdefRecordRequest>,
+    records: Vec<NdefRecordRequest>,
     expected_uid: Option<String>,
     password: Option<String>,
 ) -> Result<(), String> {
     let current = pn532::session::current_session(&session);
     run_blocking(move || {
-        pn532::session::write_ndef(
+        pn532::tags::ntag21x::write_ndef(
             &current,
             &records,
             expected_uid.as_deref(),
@@ -177,7 +177,7 @@ async fn set_ntag_password(
 ) -> Result<(), String> {
     let current = pn532::session::current_session(&session);
     run_blocking(move || {
-        pn532::session::set_ntag_password(
+        pn532::tags::ntag21x::set_ntag_password(
             &current,
             &expected_uid,
             current_password.as_deref(),
@@ -197,7 +197,7 @@ async fn clear_ntag_password(
 ) -> Result<(), String> {
     let current = pn532::session::current_session(&session);
     run_blocking(move || {
-        pn532::session::clear_ntag_password(&current, &expected_uid, &current_password)
+        pn532::tags::ntag21x::clear_ntag_password(&current, &expected_uid, &current_password)
     })
     .await?
     .map_err(|e| e.to_string())
@@ -211,7 +211,7 @@ async fn read_ntag_password_status(
     session: tauri::State<'_, SessionSlot>,
 ) -> Result<Option<PasswordProtection>, String> {
     let current = pn532::session::current_session(&session);
-    run_blocking(move || pn532::session::read_ntag_password_status(&current))
+    run_blocking(move || pn532::tags::ntag21x::read_ntag_password_status(&current))
         .await?
         .map_err(|e| e.to_string())
 }
@@ -240,7 +240,7 @@ async fn read_classic_sector(
     sector: u8,
 ) -> Result<Option<ClassicSectorInfo>, String> {
     let current = pn532::session::current_session(&session);
-    run_blocking(move || pn532::session::read_classic_sector(&current, sector))
+    run_blocking(move || pn532::tags::mifare_classic::read_classic_sector(&current, sector))
         .await?
         .map_err(|e| e.to_string())
 }
@@ -253,10 +253,10 @@ async fn read_classic_sector(
 async fn copy_classic_card(
     session: tauri::State<'_, SessionSlot>,
     source_uid: String,
-    sectors: Vec<pn532::session::ClassicSectorData>,
+    sectors: Vec<ClassicSectorData>,
 ) -> Result<ClassicCopyResult, String> {
     let current = pn532::session::current_session(&session);
-    run_blocking(move || pn532::session::copy_classic_card(&current, &source_uid, &sectors))
+    run_blocking(move || pn532::tags::mifare_classic::copy_classic_card(&current, &source_uid, &sectors))
         .await?
         .map_err(|e| e.to_string())
 }

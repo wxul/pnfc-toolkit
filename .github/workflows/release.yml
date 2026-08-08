@@ -80,7 +80,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "pn532-toolkit ${{ github.ref_name }}"
+          releaseName: "pnfc-toolkit ${{ github.ref_name }}"
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: false
@@ -96,8 +96,8 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ github.ref_name }}" -replace '^v', ''
-          $zipName = "pn532-toolkit_${version}_x64_portable.zip"
-          Compress-Archive -Path "src-tauri/target/release/pn532-toolkit.exe" -DestinationPath $zipName
+          $zipName = "pnfc-toolkit_${version}_x64_portable.zip"
+          Compress-Archive -Path "src-tauri/target/release/pnfc-toolkit.exe" -DestinationPath $zipName
           echo "PORTABLE_ZIP=$zipName" >> $env:GITHUB_ENV
 
       - name: Upload portable build to the release

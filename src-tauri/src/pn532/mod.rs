@@ -4,5 +4,6 @@ pub mod ndef;
 pub mod probe;
 pub mod protocol;
 pub mod session;
+pub mod tags;
 
 pub use probe::{list_serial_ports, probe_port, scan_for_pn532, Pn532Info, SerialPortSummary};

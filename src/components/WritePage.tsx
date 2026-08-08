@@ -1,54 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { logFrontend } from "@/lib/devLog";
-import { useI18n, type TranslationKey } from "@/lib/i18n";
-import { isValidPasswordHex, type CardInfo, type PasswordProtection } from "@/lib/pn532Types";
-import { buildVCard, isVCardFilled, type VCardFields } from "@/lib/vcard";
-
-type RecordKind = "url" | "text" | "tel" | "sms" | "mailto" | "geo" | "vcard" | "wifi";
-
-interface RecordDraft {
-  id: number;
-  kind: RecordKind;
-  fields: Record<string, string>;
-}
-
-const KIND_LABEL_KEYS: Record<RecordKind, TranslationKey> = {
-  url: "write.kindUrl",
-  text: "write.kindText",
-  tel: "write.kindTel",
-  sms: "write.kindSms",
-  mailto: "write.kindMailto",
-  geo: "write.kindGeo",
-  vcard: "write.kindVcard",
-  wifi: "write.kindWifi",
-};
-
-function buildContent(kind: RecordKind, fields: Record<string, string>): string {
-  switch (kind) {
-    case "geo":
-      return `${fields.lat ?? ""},${fields.lng ?? ""}`;
-    case "vcard":
-      return buildVCard(fields as VCardFields);
-    case "wifi":
-      return `${fields.ssid ?? ""}\n${fields.password ?? ""}`;
-    default:
-      return fields.value ?? "";
-  }
-}
-
-function isDraftFilled(kind: RecordKind, fields: Record<string, string>): boolean {
-  switch (kind) {
-    case "geo":
-      return !!fields.lat?.trim() && !!fields.lng?.trim();
-    case "vcard":
-      return isVCardFilled(fields as VCardFields);
-    case "wifi":
-      return !!fields.ssid?.trim();
-    default:
-      return !!fields.value?.trim();
-  }
-}
+import { useI18n } from "@/lib/i18n";
+import { cardFamily, isValidPasswordHex, type CardInfo, type PasswordProtection } from "@/lib/pn532Types";
+import {
+  buildContent,
+  isDraftFilled,
+  KIND_LABEL_KEYS,
+  newDraft,
+  type RecordDraft,
+  type RecordKind,
+} from "@/lib/writeRecords";
 
 function RecordFields({
   draft,
@@ -163,62 +125,158 @@ function RecordFields({
   }
 }
 
-let nextDraftId = 1;
+let nextLogId = 1;
+
+interface WriteLogEntry {
+  id: number;
+  uid: string;
+  ok: boolean;
+  message: string;
+  time: string;
+}
+
+// idle: content is being edited, nothing waiting — available as soon as the device is connected,
+// no card needed yet.
+// waiting: armed and registered with the shared poller. In single mode this covers exactly one
+// card (writes once, then drops back to idle); in continuous mode it stays armed indefinitely,
+// writing to every card placed until "stop" is clicked.
+type Phase = "idle" | "waiting";
 
 export function WritePage({
   connectedPort,
   card,
-  setPollingPaused,
+  detectionSeq,
+  requestPolling,
+  initialDrafts,
+  onInitialDraftsConsumed,
 }: {
   connectedPort: string | null;
   card: CardInfo | null;
-  /** Checking the password-protection status takes one antenna exchange; background polling
-   * is paused during that so the two don't compete. */
-  setPollingPaused: (paused: boolean) => void;
+  /** Bumped every time a card goes from "absent" to "present" — the trigger for noticing a new
+   * card while `waiting`, not `card.uid` (the same card lifted off and set back down again
+   * should still count as a new placement in continuous mode). */
+  detectionSeq: number;
+  /** Registers/unregisters this page's need for live card detection with the shared poller —
+   * only needed while actually `waiting`, not just for having this page open (editing the
+   * content doesn't need a card at all). */
+  requestPolling: (id: string, want: boolean) => void;
+  /** Set by "write" on a saved-data entry (see SavedCardsPage) — seeds the editor with that
+   * record's content instead of the usual single blank URL draft. Only consulted once, at
+   * mount (this page isn't kept mounted across navigation, so a fresh mount happens every time
+   * the write tab is entered). */
+  initialDrafts?: RecordDraft[] | null;
+  /** Called once `initialDrafts` has been consumed, so the parent can clear it — otherwise
+   * navigating away and back into the write page later (without a fresh "write" click from
+   * saved data) would keep reloading the same stale content. */
+  onInitialDraftsConsumed?: () => void;
 }) {
   const { t } = useI18n();
-  const [drafts, setDrafts] = useState<RecordDraft[]>([
-    { id: nextDraftId++, kind: "url", fields: {} },
-  ]);
-  const [writing, setWriting] = useState(false);
-  const [result, setResult] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [protection, setProtection] = useState<PasswordProtection | null>(null);
-  const [confirming, setConfirming] = useState(false);
-  const [writePassword, setWritePassword] = useState("");
-  const cancelledRef = useRef(false);
+  const [drafts, setDrafts] = useState<RecordDraft[]>(() => initialDrafts ?? [newDraft()]);
+  const [continuous, setContinuous] = useState(false);
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [password, setPassword] = useState("");
+  const [busyUid, setBusyUid] = useState<string | null>(null);
+  const [log, setLog] = useState<WriteLogEntry[]>([]);
+  // The detectionSeq baseline as of the last time waiting started — see the comment in
+  // `startWaiting` for why this is the current seq at that moment, not a fixed sentinel like 0.
+  const armedSeqRef = useRef(0);
+  const busyRef = useRef(false);
 
-  // As soon as the card changes (UID changed), recheck whether this card needs a password to
-  // write — using the lightweight single-page query (not a full card dump), fast enough to use
-  // right before writing.
   useEffect(() => {
-    let cancelled = false;
-    setProtection(null);
-    if (card && card.sel_res === "00") {
-      queueMicrotask(() => {
-        if (!cancelled) checkProtection();
-      });
-    }
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [card?.uid]);
+    requestPolling("write", phase === "waiting");
+    return () => requestPolling("write", false);
+  }, [phase, requestPolling]);
 
-  async function checkProtection() {
-    setPollingPaused(true);
+  useEffect(() => {
+    if (phase !== "waiting" || !card || busyRef.current) return;
+    if (detectionSeq === armedSeqRef.current) return;
+    armedSeqRef.current = detectionSeq;
+    void attemptWrite(card);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, card, detectionSeq]);
+
+  // A disconnect mid-wait has nothing left to write to; drop back to editing instead of leaving
+  // the UI stuck waiting for a card that can never show up.
+  useEffect(() => {
+    if (!connectedPort) setPhase("idle");
+  }, [connectedPort]);
+
+  useEffect(() => {
+    if (initialDrafts) onInitialDraftsConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function appendLog(uid: string, ok: boolean, message: string) {
+    setLog((prev) =>
+      [{ id: nextLogId++, uid, ok, message, time: new Date().toLocaleTimeString() }, ...prev].slice(
+        0,
+        100,
+      ),
+    );
+  }
+
+  async function attemptWrite(target: CardInfo) {
+    busyRef.current = true;
+    setBusyUid(target.uid);
     try {
-      const p = await invoke<PasswordProtection | null>("read_ntag_password_status");
-      setProtection(p);
+      const family = cardFamily(target.sel_res);
+      if (family !== "ntag") {
+        appendLog(
+          target.uid,
+          false,
+          family === "classic" ? t("write.classicNotSupported") : t("write.unsupportedModel"),
+        );
+        return;
+      }
+      let pwd: string | undefined;
+      let protectionInfo: PasswordProtection | null;
+      try {
+        protectionInfo = await invoke<PasswordProtection | null>("read_ntag_password_status");
+      } catch (e) {
+        appendLog(target.uid, false, `${t("write.checkFailed")}: ${String(e)}`);
+        return;
+      }
+      if (protectionInfo?.enabled) {
+        if (!isValidPasswordHex(password)) {
+          appendLog(target.uid, false, t("write.passwordRequired"));
+          return;
+        }
+        pwd = password.trim();
+      }
+      const records = drafts.map((d) => ({ kind: d.kind, content: buildContent(d.kind, d.fields) }));
+      logFrontend("info", `Writing ${records.length} record(s) to ${target.uid}`);
+      await invoke("write_ndef", { records, expectedUid: target.uid, password: pwd });
+      appendLog(target.uid, true, t("write.writeSuccess"));
+      logFrontend("info", `Write to ${target.uid} succeeded`);
     } catch (e) {
-      logFrontend("error", `Failed to read password protection status: ${String(e)}`);
+      appendLog(target.uid, false, String(e));
+      logFrontend("error", `Write to ${target.uid} failed: ${String(e)}`);
     } finally {
-      setPollingPaused(false);
+      busyRef.current = false;
+      setBusyUid(null);
+      if (!continuous) setPhase("idle");
     }
   }
 
+  function startWaiting() {
+    if (!allFilled) return;
+    // Baseline = the current seq, not 0 — `card`/`detectionSeq` can be stale left over from
+    // before polling was off (e.g. a previous failed attempt dropped back to idle, and the card
+    // was then removed with nobody polling to notice), so trusting them directly here risked
+    // immediately attempting a write against a card that isn't there anymore ("no card present").
+    // The poller resets its own presence tracking on resume (see `usePn532Connection`),
+    // guaranteeing the first tick after this is a fresh, trustworthy check — including correctly
+    // noticing a card that's been sitting there the whole time.
+    armedSeqRef.current = detectionSeq;
+    setPhase("waiting");
+  }
+
+  function stopWaiting() {
+    setPhase("idle");
+  }
+
   function addDraft() {
-    setDrafts((prev) => [...prev, { id: nextDraftId++, kind: "url", fields: {} }]);
+    setDrafts((prev) => [...prev, newDraft()]);
   }
 
   function removeDraft(id: number) {
@@ -237,74 +295,6 @@ export function WritePage({
 
   const allFilled = drafts.length > 0 && drafts.every((d) => isDraftFilled(d.kind, d.fields));
 
-  // This used to be a window.confirm, but a password-protected card needs to collect a
-  // password before writing, and a native confirm dialog can't have an input field — so this
-  // was changed to an inline confirmation panel: clicking "write" first enters the confirming
-  // state, the panel shows a password field if needed, and actually starting the write requires
-  // one more click inside the panel to confirm.
-  function requestWrite() {
-    if (!allFilled || !card) return;
-    setWritePassword("");
-    setResult(null);
-    setError(null);
-    setConfirming(true);
-  }
-
-  function cancelConfirm() {
-    setConfirming(false);
-    setWritePassword("");
-  }
-
-  async function confirmWrite() {
-    if (!card) return;
-    if (protection?.enabled && !isValidPasswordHex(writePassword)) return;
-    const records = drafts.map((d) => ({ kind: d.kind, content: buildContent(d.kind, d.fields) }));
-
-    // There's a time gap between clicking confirm and actually executing — remember which
-    // card (UID) it was at that moment; the backend re-checks this right before actually
-    // writing, and aborts instead of writing to a different card if it was swapped out.
-    const targetUid = card.uid;
-    const password = protection?.enabled ? writePassword.trim() : undefined;
-    cancelledRef.current = false;
-    setConfirming(false);
-    setWritePassword("");
-    setWriting(true);
-    setError(null);
-    setResult(null);
-    logFrontend("info", `Writing ${records.length} record(s) to ${targetUid}`);
-    try {
-      await invoke("write_ndef", { records, expectedUid: targetUid, password });
-      if (cancelledRef.current) {
-        logFrontend("info", "Write finished, but the user had already clicked cancel — not showing the result");
-        return;
-      }
-      setResult(t("write.writeSuccess"));
-      logFrontend("info", "Write succeeded");
-    } catch (e) {
-      if (cancelledRef.current) {
-        logFrontend("info", `Write failed (already cancelled, ignoring): ${String(e)}`);
-        return;
-      }
-      setError(String(e));
-      logFrontend("error", `Write failed: ${String(e)}`);
-    } finally {
-      if (!cancelledRef.current) setWriting(false);
-    }
-  }
-
-  function handleCancel() {
-    // The backend call has already been sent — there's no safe way to interrupt a serial
-    // command partway through (if it happens to land right in the middle of writing a page,
-    // interrupting it could actually corrupt the card instead). What this can do is stop the UI
-    // from waiting on it and showing the result, letting the user immediately switch to reading
-    // another card; the actual write command may still finish running in the background.
-    cancelledRef.current = true;
-    setWriting(false);
-    setError(null);
-    setResult(null);
-    logFrontend("info", "User cancelled waiting for the write result");
-  }
-
   if (!connectedPort) {
     return (
       <div className="mx-auto flex max-w-lg flex-col gap-4 pt-8">
@@ -313,25 +303,7 @@ export function WritePage({
     );
   }
 
-  if (!card) {
-    return (
-      <div className="mx-auto flex max-w-lg flex-col gap-4 pt-8">
-        <p className="text-center text-sm text-muted-foreground">{t("readCard.waitingForCard")}</p>
-      </div>
-    );
-  }
-
-  const isNtagFamily = card.sel_res === "00";
-
-  if (!isNtagFamily) {
-    return (
-      <div className="mx-auto flex max-w-lg flex-col gap-4 pt-8">
-        <p className="text-center text-sm text-muted-foreground">
-          {t("write.unsupportedCardType", { type: card.card_type })}
-        </p>
-      </div>
-    );
-  }
+  const locked = phase === "waiting";
 
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-3 pt-8">
@@ -342,7 +314,7 @@ export function WritePage({
               className="flex-1 rounded-md border bg-background px-2 py-1.5 text-sm disabled:opacity-50"
               value={draft.kind}
               onChange={(e) => setKind(draft.id, e.target.value as RecordKind)}
-              disabled={writing}
+              disabled={locked}
             >
               {(Object.keys(KIND_LABEL_KEYS) as RecordKind[]).map((k) => (
                 <option key={k} value={k}>
@@ -354,7 +326,7 @@ export function WritePage({
               <button
                 className="rounded-md border px-2 py-1.5 text-xs text-destructive hover:bg-destructive/10 disabled:opacity-50"
                 onClick={() => removeDraft(draft.id)}
-                disabled={writing}
+                disabled={locked}
               >
                 {t("write.deleteRecord")}
               </button>
@@ -362,7 +334,7 @@ export function WritePage({
           </div>
           <RecordFields
             draft={draft}
-            disabled={writing}
+            disabled={locked}
             onChange={(field, value) => setField(draft.id, field, value)}
           />
         </div>
@@ -371,65 +343,95 @@ export function WritePage({
       <button
         className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted disabled:opacity-50"
         onClick={addDraft}
-        disabled={writing}
+        disabled={locked}
       >
         {t("write.addRecord")}
       </button>
 
-      {writing ? (
-        <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-1.5 text-sm">
-          <span className="flex-1 text-muted-foreground">
-            {t("write.writingInProgress", { uid: card.uid })}
-          </span>
-          <button
-            className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted"
-            onClick={handleCancel}
-          >
-            {t("common.cancel")}
-          </button>
-        </div>
-      ) : confirming ? (
-        <div className="flex flex-col gap-2 rounded-md border p-3 text-sm">
-          <p>
-            {t("write.confirmOverwrite", { count: drafts.length })}
-          </p>
-          {protection?.enabled && (
-            <input
-              className="rounded-md border bg-background px-3 py-1.5 text-sm font-mono disabled:opacity-50"
-              placeholder={t("write.passwordPlaceholder")}
-              value={writePassword}
-              onChange={(e) => setWritePassword(e.target.value)}
-              autoFocus
-            />
-          )}
-          <div className="flex justify-end gap-2">
+      <div className="flex gap-2">
+        <button
+          className={`flex-1 rounded-md border px-3 py-1.5 text-sm disabled:opacity-50 ${
+            continuous ? "hover:bg-muted" : "bg-accent font-medium"
+          }`}
+          onClick={() => setContinuous(false)}
+          disabled={locked}
+        >
+          {t("write.modeSingle")}
+        </button>
+        <button
+          className={`flex-1 rounded-md border px-3 py-1.5 text-sm disabled:opacity-50 ${
+            continuous ? "bg-accent font-medium" : "hover:bg-muted"
+          }`}
+          onClick={() => setContinuous(true)}
+          disabled={locked}
+        >
+          {t("write.modeContinuous")}
+        </button>
+      </div>
+
+      <input
+        className="rounded-md border bg-background px-3 py-1.5 text-sm font-mono disabled:opacity-50"
+        placeholder={t("write.sharedPasswordPlaceholder")}
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        disabled={locked}
+      />
+
+      {phase === "idle" ? (
+        <button
+          className="rounded-md border bg-secondary px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
+          onClick={startWaiting}
+          disabled={!allFilled}
+        >
+          {continuous ? t("write.startContinuous") : t("write.writeButton")}
+        </button>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+            {t("write.overwriteWarning")}
+          </div>
+          <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-1.5 text-sm">
+            <span className="flex-1 text-muted-foreground">
+              {busyUid ? t("write.writingInProgress", { uid: busyUid }) : t("write.waitingForCard")}
+            </span>
             <button
-              className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
-              onClick={cancelConfirm}
+              className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted"
+              onClick={stopWaiting}
             >
-              {t("common.cancel")}
-            </button>
-            <button
-              className="rounded-md border bg-secondary px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
-              onClick={confirmWrite}
-              disabled={!!protection?.enabled && !isValidPasswordHex(writePassword)}
-            >
-              {t("write.confirmWrite")}
+              {continuous ? t("write.stop") : t("common.cancel")}
             </button>
           </div>
         </div>
-      ) : (
-        <button
-          className="rounded-md border bg-secondary px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
-          onClick={requestWrite}
-          disabled={!allFilled}
-        >
-          {t("write.writeButton")}{drafts.length > 1 ? t("write.writeCountSuffix", { count: drafts.length }) : ""}
-        </button>
       )}
 
-      {result && <p className="text-sm text-green-600">{result}</p>}
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {log.length > 0 && (
+        <div className="flex flex-col gap-1 rounded-md border p-2 text-xs">
+          <div className="flex items-center justify-between px-1 pb-1 text-muted-foreground">
+            <span>
+              {t("write.successCount", { count: log.filter((e) => e.ok).length })}
+              {" · "}
+              {t("write.errorCount", { count: log.filter((e) => !e.ok).length })}
+            </span>
+            <button className="hover:underline" onClick={() => setLog([])}>
+              {t("write.clearLog")}
+            </button>
+          </div>
+          <div className="flex max-h-56 flex-col gap-1 overflow-auto">
+            {log.map((entry) => (
+              <div
+                key={entry.id}
+                className={`flex items-center gap-2 rounded px-1.5 py-1 ${
+                  entry.ok ? "text-green-600" : "text-destructive"
+                }`}
+              >
+                <span className="font-mono">{entry.uid}</span>
+                <span className="flex-1">{entry.message}</span>
+                <span className="text-muted-foreground">{entry.time}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

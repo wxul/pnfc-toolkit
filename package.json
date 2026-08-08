@@ -1,5 +1,6 @@
 {
-  "name": "pn532-toolkit",
+  "name": "pnfc-toolkit",
+  "description": "A cross-platform NFC reader/writer toolkit — currently built for the PN532 module; support for other NFC controller chips (e.g. PN7160) may be added in the future.",
   "private": true,
   "version": "0.1.0",
   "type": "module",

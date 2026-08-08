@@ -7,12 +7,18 @@ import { classicSectorCount, type CardInfo, type ClassicSectorInfo } from "@/lib
 export function ClassicSectorView({
   card,
   onSectorsChange,
+  onScanComplete,
   setPollingPaused,
 }: {
   card: CardInfo;
   /** Called every time the scan results change, so the parent (the copy feature) can get the
    * latest scanned sector data. */
   onSectorsChange?: (sectors: ClassicSectorInfo[]) => void;
+  /** Fired once when a scan finishes every sector without being interrupted by an error or the
+   * card being removed partway through — i.e. the read is genuinely complete, not just "the scan
+   * loop stopped running". Not fired on a partial/interrupted scan (the auto-retry below will
+   * eventually get there and fire it then). */
+  onScanComplete?: () => void;
   /** Pause background polling during the scan, so it doesn't compete for the antenna with
    * per-sector authentication and interrupt it. */
   setPollingPaused: (paused: boolean) => void;
@@ -40,6 +46,11 @@ export function ClassicSectorView({
     setError(null);
     setSectors([]);
     setExpanded(null);
+    // Distinguishes "the loop stopped because every sector was attempted" from "the loop broke
+    // early" — `onScanComplete` should only fire for the former; `error` itself isn't usable for
+    // this because the `setError` call above hasn't necessarily been applied to state yet by the
+    // time this synchronous function reads it back.
+    let interrupted = false;
     try {
       const total = classicSectorCount(card.sel_res);
       logFrontend("info", `Scanning ${total} sector(s) of ${card.uid}...`);
@@ -50,12 +61,14 @@ export function ClassicSectorView({
           if (scanTokenRef.current !== token) return;
           if (!info) {
             setError(t("classicSector.cardRemoved"));
+            interrupted = true;
             break;
           }
           setSectors((prev) => [...prev, info]);
         } catch (e) {
           if (scanTokenRef.current !== token) return;
           setError(String(e));
+          interrupted = true;
           logFrontend("error", `Failed to scan sector ${sector}: ${String(e)}`);
           break;
         }
@@ -63,6 +76,7 @@ export function ClassicSectorView({
       if (scanTokenRef.current === token) {
         setScanning(false);
         logFrontend("info", "Sector scan finished");
+        if (!interrupted) onScanComplete?.();
       }
     } finally {
       if (scanTokenRef.current === token) {

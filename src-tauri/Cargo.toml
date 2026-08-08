@@ -1,7 +1,7 @@
 [package]
-name = "pn532-toolkit"
+name = "pnfc-toolkit"
 version = "0.1.0"
-description = "A Tauri App"
+description = "A cross-platform NFC reader/writer toolkit — currently built for the PN532 module; support for other NFC controller chips (e.g. PN7160) may be added in the future."
 authors = ["you"]
 edition = "2021"
 
@@ -11,7 +11,7 @@ edition = "2021"
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "pn532_toolkit_lib"
+name = "pnfc_toolkit_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

@@ -9,6 +9,10 @@ pub const CMD_RF_CONFIGURATION: u8 = 0x32;
 pub const CMD_SAM_CONFIGURATION: u8 = 0x14;
 pub const CMD_IN_LIST_PASSIVE_TARGET: u8 = 0x4A;
 pub const CMD_IN_DATA_EXCHANGE: u8 = 0x40;
+/// Unlike `InDataExchange`, this relays bytes to the currently selected target completely
+/// untouched — no automatic MIFARE Classic authentication shortcut for a leading 0x60/0x61 (see
+/// the comment on `NTAG_CMD_GET_VERSION` in session.rs for why that matters).
+pub const CMD_IN_COMMUNICATE_THRU: u8 = 0x42;
 
 /// The standard frame's LEN field is only 1 byte, so TFI+CMD+PARAMS together can't exceed
 /// this without switching to a standard frame's alternative — PN532 also defines an
@@ -19,6 +23,17 @@ pub const CMD_IN_DATA_EXCHANGE: u8 = 0x40;
 const MAX_FRAME_DATA_LEN: usize = 255;
 
 const ACK_FRAME: [u8; 6] = [0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00];
+
+/// The PN532 sends this fixed 1-byte body (`00 00 FF 01 FF 7F 81 00` as a full frame) when it
+/// rejects the command frame it just received — this is the chip talking about its own framing,
+/// not a reply relayed from a card. Seen in practice on non-genuine/clone PN532 firmware for
+/// `InDataExchange` payloads starting with `0x60`/`0x61`: those bytes are also MIFARE Classic's
+/// "authenticate with Key A/B" opcodes, and some clone firmware special-cases them as a
+/// convenience shortcut for a full Classic authentication (expecting a block number + 6-byte key
+/// + 4-byte UID to follow) — so a Type 2 Tag command that legitimately starts with the same byte
+/// (like `GET_VERSION` = `0x60`) but has a completely different, shorter parameter shape gets
+/// rejected as malformed instead of passed through untouched.
+const PN532_ERROR_FRAME_BODY: u8 = 0x7F;
 
 /// After power-up or coming out of LowVBat, the PN532's UART interface needs to be "woken up"
 /// before it'll accept the first real command frame — otherwise the first command often just
@@ -112,6 +127,14 @@ fn read_response(port: &mut dyn SerialPort) -> Result<Vec<u8>, Pn532Error> {
     let sum = body.iter().fold(0u8, |acc, b| acc.wrapping_add(*b));
     if sum.wrapping_add(dcs) != 0 {
         return Err(Pn532Error::InvalidFrame("data checksum mismatch".into()));
+    }
+    if body == [PN532_ERROR_FRAME_BODY] {
+        return Err(Pn532Error::InvalidFrame(
+            "PN532 rejected the command frame (error frame 0x7F) — often seen on clone PN532 \
+             firmware when the InDataExchange payload starts with 0x60/0x61, which some clones \
+             special-case as a MIFARE Classic auth shortcut instead of passing it through"
+                .into(),
+        ));
     }
     if body.first() != Some(&PN532_TO_HOST) {
         return Err(Pn532Error::InvalidFrame(format!(

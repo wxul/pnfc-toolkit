@@ -22,7 +22,7 @@ export function AppMenubar({
             Development
           </MenubarItem>
           <MenubarItem className="whitespace-nowrap" onClick={onOpenAbout}>
-            About pn532-toolkit
+            About pnfc-toolkit
           </MenubarItem>
         </MenubarContent>
       </MenubarMenu>

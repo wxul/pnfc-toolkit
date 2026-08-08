@@ -39,6 +39,112 @@ function formatRev(date: Date): string {
   return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
 }
 
+function unescapeVCardValue(v: string): string {
+  return v.replace(/\\n/g, "\n").replace(/\\,/g, ",").replace(/\\;/g, ";").replace(/\\\\/g, "\\");
+}
+
+/** Splits a vCard structured value (like N or ADR) on unescaped ";" — a plain `.split(";")`
+ * would also break on an intentionally-escaped "\;" inside a field. */
+function splitVCardStructured(value: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  for (let i = 0; i < value.length; i++) {
+    if (value[i] === "\\" && i + 1 < value.length) {
+      current += value[i] + value[i + 1];
+      i++;
+    } else if (value[i] === ";") {
+      parts.push(current);
+      current = "";
+    } else {
+      current += value[i];
+    }
+  }
+  parts.push(current);
+  return parts;
+}
+
+/** The inverse of `buildVCard`, for loading a previously-read vCard back into editable fields
+ * (see "write from saved data"). Best-effort, not a full RFC 6350 parser — handles exactly the
+ * property set `buildVCard` emits, plus tolerates a `;PARAM=...` suffix on the property name
+ * (e.g. `TEL;TYPE=CELL:`) by just ignoring the parameters. A vCard from some other app that uses
+ * properties this doesn't recognize just has those fields come back empty rather than erroring
+ * out — there's always the raw record view to fall back on. */
+export function parseVCard(text: string): VCardFields {
+  const fields: VCardFields = {};
+  for (const rawLine of text.split(/\r\n|\r|\n/)) {
+    const sep = rawLine.indexOf(":");
+    if (sep === -1) continue;
+    const key = rawLine.slice(0, sep).split(";")[0].trim().toUpperCase();
+    const value = rawLine.slice(sep + 1);
+
+    switch (key) {
+      case "N": {
+        const [family, given] = splitVCardStructured(value).map(unescapeVCardValue);
+        if (family) fields.familyName = family;
+        if (given) fields.givenName = given;
+        break;
+      }
+      case "ADR": {
+        const [, , street, city, state, postalCode, country] =
+          splitVCardStructured(value).map(unescapeVCardValue);
+        if (street) fields.adrStreet = street;
+        if (city) fields.adrCity = city;
+        if (state) fields.adrState = state;
+        if (postalCode) fields.adrPostalCode = postalCode;
+        if (country) fields.adrCountry = country;
+        break;
+      }
+      case "NICKNAME":
+        fields.nickname = unescapeVCardValue(value);
+        break;
+      case "ORG":
+        fields.org = unescapeVCardValue(value);
+        break;
+      case "TITLE":
+        fields.title = unescapeVCardValue(value);
+        break;
+      case "ROLE":
+        fields.role = unescapeVCardValue(value);
+        break;
+      case "TEL":
+        fields.phone = unescapeVCardValue(value);
+        break;
+      case "EMAIL":
+        fields.email = unescapeVCardValue(value);
+        break;
+      case "URL":
+        fields.url = unescapeVCardValue(value);
+        break;
+      case "LABEL":
+        fields.label = unescapeVCardValue(value);
+        break;
+      case "NOTE":
+        fields.note = unescapeVCardValue(value);
+        break;
+      // PHOTO/LOGO/BDAY/ANNIVERSARY aren't escaped on the way out (see buildVCard), so they
+      // aren't unescaped on the way back in either.
+      case "PHOTO":
+        fields.photo = value;
+        break;
+      case "LOGO":
+        fields.logo = value;
+        break;
+      case "BDAY":
+        fields.bday = value;
+        break;
+      case "ANNIVERSARY":
+        fields.anniversary = value;
+        break;
+      case "CATEGORIES":
+        fields.categories = unescapeVCardValue(value);
+        break;
+      default:
+        break;
+    }
+  }
+  return fields;
+}
+
 export function isVCardFilled(f: VCardFields): boolean {
   return !!(f.familyName?.trim() || f.givenName?.trim());
 }

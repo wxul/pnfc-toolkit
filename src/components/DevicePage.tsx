@@ -147,6 +147,19 @@ export function DevicePage({
             )}
           </div>
 
+          <div className="overflow-hidden rounded-md border">
+            <p className="border-b bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground">
+              {t("device.supportedTypesTitle")}
+            </p>
+            <ul className="px-3 py-2 text-sm">
+              <li>{t("device.supportedTypeNtag")}</li>
+              <li>{t("device.supportedTypeClassic")}</li>
+            </ul>
+            <p className="border-t px-3 py-2 text-xs text-muted-foreground">
+              {t("device.supportedTypesHint")}
+            </p>
+          </div>
+
           <div className="flex justify-center">
             <button
               className="rounded-md border bg-destructive/10 px-3 py-1.5 text-sm font-medium text-destructive hover:bg-destructive/20"

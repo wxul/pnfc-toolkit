@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { logFrontend } from "@/lib/devLog";
 import type { CardInfo, Pn532Info, SerialPortSummary } from "@/lib/pn532Types";
@@ -33,6 +33,21 @@ export function usePn532Connection() {
     null,
   );
   const [connectError, setConnectError] = useState<string | null>(null);
+  // Nobody polls just because they're connected anymore — each consumer that actually needs
+  // live card detection (the read page while it's waiting, the write page while it's open)
+  // registers its own want here under a stable id; the interval only runs while at least one
+  // want is registered. Id-based (not a single shared boolean) so independent consumers don't
+  // clobber each other's "I still need this" state.
+  const pollWantsRef = useRef<Set<string>>(new Set());
+  const [pollingEnabled, setPollingEnabledState] = useState(false);
+  // Stable identity (via useCallback) matters here: consumers pass this to effects keyed on
+  // `[..., requestPolling]`, and a function that's a new reference every render would make those
+  // effects re-fire (registering then immediately re-registering) on every unrelated re-render.
+  const requestPolling = useCallback((id: string, want: boolean) => {
+    if (want) pollWantsRef.current.add(id);
+    else pollWantsRef.current.delete(id);
+    setPollingEnabledState(pollWantsRef.current.size > 0);
+  }, []);
   const [card, setCard] = useState<CardInfo | null>(null);
   // Bumped every time a card goes from "absent" to "present", regardless of whether it's the
   // same card as last time (same UID). Page state like "cleared" needs to follow this, not
@@ -117,6 +132,22 @@ export function usePn532Connection() {
       wasPresentRef.current = false;
       return;
     }
+    // No registered want (nobody's actively waiting on the read page, and the write page isn't
+    // open) — no reason to keep hitting the antenna every 500ms. `card` is deliberately left as
+    // it was rather than cleared here: turning polling off isn't the same as "clear", stale
+    // results should stay visible until the user explicitly clears them.
+    if (!pollingEnabled) {
+      return;
+    }
+    // Same reasoning as `clearCard` below: `wasPresentRef` was last updated whenever polling
+    // previously stopped, and could be stale by the time it resumes (e.g. the card was removed
+    // during the gap while nobody was polling, so no tick ever saw it leave). Resetting it here
+    // guarantees the first tick after resuming treats "a card is currently present" as a fresh
+    // detection (bumping `detectionSeq`) rather than silently trusting whatever was true before —
+    // callers that want to notice "a card was already sitting there" when they start waiting
+    // need to wait for that first fresh tick instead of trusting the old `card`/`detectionSeq`
+    // snapshot from before polling was off.
+    wasPresentRef.current = false;
     pollRef.current = window.setInterval(async () => {
       if (pollingPausedRef.current) return;
       try {
@@ -138,7 +169,7 @@ export function usePn532Connection() {
     return () => {
       if (pollRef.current != null) window.clearInterval(pollRef.current);
     };
-  }, [connectedPort]);
+  }, [connectedPort, pollingEnabled]);
 
   async function connect() {
     if (!selectedPort) return;
@@ -209,6 +240,7 @@ export function usePn532Connection() {
     card,
     detectionSeq,
     setPollingPaused,
+    requestPolling,
     scanDevices,
     connect,
     disconnect,

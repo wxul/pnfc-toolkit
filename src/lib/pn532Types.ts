@@ -92,6 +92,18 @@ export interface ClassicCopyResult {
   sectors_failed: number[];
 }
 
+export type CardFamily = "ntag" | "classic" | "unsupported";
+
+/** SAK (SEL_RES) -> which of the two tag families this app actually implements anything for.
+ * "unsupported" doesn't mean the PN532 hardware itself can't talk to the card (it may well
+ * support ISO14443-4 smart cards, FeliCa, etc.) — it means this app's software hasn't
+ * implemented handling for that family, whatever the reader chip is capable of. */
+export function cardFamily(selRes: string): CardFamily {
+  if (selRes.toUpperCase() === "00") return "ntag";
+  if ((parseInt(selRes, 16) & 0x08) !== 0) return "classic";
+  return "unsupported";
+}
+
 /** SAK -> sector count, kept in sync with `classic_sector_count` on the Rust side. */
 export function classicSectorCount(selRes: string): number {
   switch (selRes.toUpperCase()) {
@@ -129,14 +141,4 @@ export function manufacturerFromUid(uid: string): string | undefined {
  * validate this, so it's shared here. */
 export function isValidPasswordHex(s: string): boolean {
   return /^[0-9a-fA-F]{8}$/.test(s.trim());
-}
-
-/** Generate a random 8-digit hex password, for one-click fill when setting up password
- * protection — easier than asking the user to come up with a solid hex password themselves. */
-export function randomPasswordHex(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(4));
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")
-    .toUpperCase();
 }

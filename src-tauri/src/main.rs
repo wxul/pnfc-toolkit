@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    pn532_toolkit_lib::run()
+    pnfc_toolkit_lib::run()
 }

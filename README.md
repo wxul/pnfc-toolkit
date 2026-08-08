@@ -1,10 +1,12 @@
-# pn532-toolkit
+# pnfc-toolkit
 
-A cross-platform desktop app for reading, writing, and inspecting NFC tags with a PN532 module over a serial (UART) connection. Built with Tauri 2 + React + Rust.
+A cross-platform desktop app for reading, writing, and inspecting NFC tags. Built with Tauri 2 + React + Rust.
+
+Currently built around the **PN532** module over a serial (UART) connection — support for other NFC controller chips (e.g. PN7160) may be added in the future.
 
 [简体中文](README.zh-CN.md)
 
-![pn532-toolkit screenshot](assets/screenshot.png)
+![pnfc-toolkit screenshot](assets/screenshot.png)
 
 ## Platform support
 

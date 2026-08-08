@@ -32,7 +32,7 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
           ✕
         </button>
         <div className="about-icon">📡</div>
-        <h2>{info?.name ?? "pn532-toolkit"}</h2>
+        <h2>{info?.name ?? "pnfc-toolkit"}</h2>
         <p className="about-desc">{t("about.description")}</p>
         <dl className="about-meta">
           <dt>{t("about.version")}</dt>
