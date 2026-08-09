@@ -1,0 +1,56 @@
+name: Feature request
+description: Suggest an idea or improvement
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion — a concrete use case (what you're trying to do, and why the current tools don't cover it) is more useful than a feature description alone.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: What are you trying to do, and where does the app currently fall short?
+      placeholder: I want to bulk-write the same NDEF content onto a stack of cards without re-entering it each time...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What you'd like to see added or changed.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Device (connect/scan)
+        - Read
+        - Write
+        - Other tools (password, saved data/tags, tag management)
+        - Export/import formats
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any workarounds you're using today, or other approaches you thought about.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and didn't find a duplicate
+          required: true

@@ -1,0 +1,72 @@
+name: Bug report
+description: Report something that isn't working as expected
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: |
+        Describe the bug, how to reproduce it, and what you expected instead. Include the app version (Help menu → About) and feel free to drag/paste screenshots in here too.
+      placeholder: |
+        What happened:
+        Clicking "Start reading" with a card already on the reader does nothing.
+
+        Steps to reproduce:
+        1. Connect to the PN532 on the Device page
+        2. Go to Read, click "Start reading"
+        3. Place an NTAG213 card on the reader
+
+        Expected: the read should start immediately.
+
+        App version: v0.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux (x86_64)
+        - Linux (ARM / Raspberry Pi or similar SBC)
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: card-type
+    attributes:
+      label: Card type involved
+      options:
+        - MIFARE Ultralight / NTAG21x
+        - MIFARE Classic (1K/4K/Mini)
+        - Not card-specific / N/A
+        - Other or unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs (optional)
+      description: Open the Dev panel from the title bar (top-right icon) to view/copy logs and raw protocol frames.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and didn't find a duplicate
+          required: true
