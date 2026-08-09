@@ -364,13 +364,37 @@ pub fn dump_memory(session: &SharedSession) -> Result<Option<MemoryDump>, Pn532E
 /// is also exactly 144 bytes with the same CC value, so the capacity byte alone can't
 /// distinguish the two models (and they use completely different password/authentication
 /// schemes — Ultralight C uses mutual 3DES authentication, nothing like NTAG21x's PWD_AUTH) —
-/// this shouldn't make that call on the user's behalf. 504/888 bytes have no known
+/// this shouldn't make that call on the user's behalf. 496/872 bytes have no known
 /// same-capacity ambiguity.
+///
+/// NTAG215/216 deliberately don't use the "504"/"888" byte figures `decode_ntag_version` reports
+/// for GET_VERSION's StorageSize — those describe the chip's total raw user memory, a few pages
+/// larger than what the CC actually declares as NDEF-usable (real NTAG215 CC bytes, confirmed
+/// against an actual factory-written tag's page3, are `E1 10 3E 00` — MLEN 0x3E = 496, not the
+/// 0x3F/504 this used to say here; NTAG216 is the same story, 0x6D = 872 not 0x6F/888). A handful
+/// of pages near the end of the physical memory (dynamic lock bytes etc.) are real, readable/
+/// writable pages that just aren't covered by the CC's declared capacity.
 fn guess_chip_model_from_cc_capacity(capacity_bytes: u32) -> Option<String> {
     match capacity_bytes {
         144 => Some("NTAG213 or MIFARE Ultralight C".into()),
-        504 => Some("NTAG215".into()),
-        888 => Some("NTAG216".into()),
+        496 => Some("NTAG215".into()),
+        872 => Some("NTAG216".into()),
+        _ => None,
+    }
+}
+
+/// The inverse of [`guess_chip_model_from_cc_capacity`]: the standard NDEF-writable capacity
+/// (CC MLEN * 8) this codebase writes into a freshly-formatted Capability Container for a given
+/// identified chip model. Same values NXP's own factory NDEF writers use, which is also why
+/// they round-trip exactly through `guess_chip_model_from_cc_capacity` above — see that
+/// function's doc comment for why NTAG215/216 aren't 504/888 here.
+fn ndef_capacity_for_chip_model(chip_model: &str) -> Option<u32> {
+    match chip_model {
+        "NTAG213" => Some(144),
+        "NTAG215" => Some(496),
+        "NTAG216" => Some(872),
+        s if s.contains("MF0UL11") => Some(48),
+        s if s.contains("MF0UL21") => Some(128),
         _ => None,
     }
 }
@@ -681,9 +705,24 @@ pub fn write_ndef(
         }
     }
 
+    write_ndef_message_to_target(&mut *conn.port, &target, &message)
+}
+
+/// Wrap `message` in its NDEF TLV, check it fits the target's declared CC capacity, pad to a
+/// whole number of pages, and write it starting at page4 — the shared tail of [`write_ndef`] and
+/// [`copy_ntag_card`], which only differ in how they arrive at the message bytes (built fresh
+/// from typed records vs. copied verbatim from another card's dump) and in their own
+/// selection/UID/password preambles before this point. Requires the target to already have a
+/// Capability Container — no CC means this tag was never formatted, and this errors out rather
+/// than guessing and writing one on the tag's behalf (see `format_ntag` for that).
+fn write_ndef_message_to_target(
+    port: &mut dyn SerialPort,
+    target: &SelectedTarget,
+    message: &[u8],
+) -> Result<(), Pn532Error> {
     // Reading from page0 conveniently also reads back page3 (the Capability Container).
     let read_resp = crate::pn532::session::send_with_retry(
-        &mut *conn.port,
+        port,
         CMD_IN_DATA_EXCHANGE,
         &[target.target_number, NTAG_CMD_READ, 0],
         3,
@@ -706,7 +745,7 @@ pub fn write_ndef(
         tlv.push(0xFF);
         tlv.extend_from_slice(&(message.len() as u16).to_be_bytes());
     }
-    tlv.extend_from_slice(&message);
+    tlv.extend_from_slice(message);
     tlv.push(0xFE); // Terminator TLV
 
     if tlv.len() > cc.capacity_bytes as usize {
@@ -726,11 +765,195 @@ pub fn write_ndef(
         let page = 4u8.wrapping_add(i as u8);
         let mut params = vec![target.target_number, NTAG_CMD_WRITE, page];
         params.extend_from_slice(page_bytes);
-        let resp = crate::pn532::session::send_with_retry(&mut *conn.port, CMD_IN_DATA_EXCHANGE, &params, 3)?;
+        let resp = crate::pn532::session::send_with_retry(port, CMD_IN_DATA_EXCHANGE, &params, 3)?;
         if resp.first() != Some(&0x00) {
             return Err(Pn532Error::InvalidFrame(format!("Failed to write page {page}")));
         }
     }
+
+    Ok(())
+}
+
+/// Copy another NTAG/Ultralight card's NDEF content onto whatever card is currently on the
+/// reader — the NTAG counterpart to `mifare_classic::copy_classic_card`. `source_message_hex` is
+/// the raw NDEF message bytes (hex-encoded) previously read from the source card via
+/// `dump_memory`, written onto the target byte-for-byte rather than being re-parsed into typed
+/// records and rebuilt — that avoids a lossy round-trip through `ndef::record_for`'s limited
+/// vocabulary of record kinds for any record type this app doesn't have a dedicated writer for.
+///
+/// Unlike `write_ndef`, this doesn't take a fixed `expected_uid` to re-check against — the whole
+/// point of "copy" is that the target keeps being whatever card the user places next, including
+/// several in a row. What it does guard against is the target being the *source* card itself
+/// (still sitting there, or placed back down) — copying it onto itself would silently look like
+/// success while doing nothing useful, so that's rejected instead, the same guard
+/// `copy_classic_card` uses. Deliberately doesn't require the target's exact chip model to match
+/// the source's (e.g. copying an NTAG213 dump onto an NTAG215) — only that it's some
+/// NTAG/Ultralight card with enough declared capacity for the content, checked inside
+/// `write_ndef_message_to_target`.
+///
+/// `password` follows the same contract as `write_ndef`: only needed if the target currently has
+/// write-password protection enabled.
+pub fn copy_ntag_card(
+    session: &SharedSession,
+    source_uid: &str,
+    source_message_hex: &str,
+    password: Option<&str>,
+) -> Result<(), Pn532Error> {
+    let message = hex::decode(source_message_hex)
+        .map_err(|_| Pn532Error::InvalidFrame("Invalid source NDEF data".into()))?;
+    let pwd = password.map(parse_password_hex).transpose()?;
+
+    let mut guard = session.lock().expect("pn532 session mutex poisoned");
+    let conn = guard.as_mut().ok_or(Pn532Error::NotConnected)?;
+
+    let Some(target) = crate::pn532::session::select_target(&mut *conn.port)? else {
+        return Err(Pn532Error::NoCardPresent);
+    };
+    if target.sak != 0x00 {
+        return Err(Pn532Error::InvalidFrame(
+            "The target card isn't an Ultralight/NTAG type; copying isn't supported for it".into(),
+        ));
+    }
+    let target_uid = hex::encode(&target.uid).to_uppercase();
+    if target_uid == source_uid.to_uppercase() {
+        return Err(Pn532Error::InvalidFrame(
+            "The card detected is still the source card itself (same UID) — swap in the target card and try again".into(),
+        ));
+    }
+    if let Some(pwd) = pwd {
+        if !pwd_auth(&mut *conn.port, target.target_number, pwd)? {
+            return Err(Pn532Error::InvalidFrame("Password is incorrect; copy not started".into()));
+        }
+    }
+
+    write_ndef_message_to_target(&mut *conn.port, &target, &message)
+}
+
+/// Select the current target, optionally re-check its UID, and (if a password was given) run
+/// PWD_AUTH — the selection/UID-guard/password preamble shared by [`format_ntag`] and
+/// [`erase_ntag`], which otherwise only differ in what they write past this point. Returns the
+/// selected target on success.
+fn select_ntag_for_erase_or_format<'a>(
+    conn: &'a mut OpenConnection,
+    expected_uid: Option<&str>,
+    password: Option<[u8; 4]>,
+    verb: &str,
+) -> Result<SelectedTarget, Pn532Error> {
+    let Some(target) = crate::pn532::session::select_target(&mut *conn.port)? else {
+        return Err(Pn532Error::NoCardPresent);
+    };
+    if target.sak != 0x00 {
+        return Err(Pn532Error::InvalidFrame(format!(
+            "The current card isn't an Ultralight/NTAG type; {verb} isn't supported for it"
+        )));
+    }
+    if let Some(expected) = expected_uid {
+        let actual = hex::encode(&target.uid).to_uppercase();
+        if actual != expected.to_uppercase() {
+            return Err(Pn532Error::InvalidFrame(format!(
+                "The card was swapped (expected to {verb} {expected}, but detected {actual}) — {verb} cancelled"
+            )));
+        }
+    }
+    if let Some(pwd) = password {
+        if !pwd_auth(&mut *conn.port, target.target_number, pwd)? {
+            return Err(Pn532Error::InvalidFrame(format!(
+                "Password is incorrect; {verb} not started"
+            )));
+        }
+    }
+    Ok(target)
+}
+
+/// Overwrite the entire NDEF-usable data area (page4 onward, sized by the CC's declared
+/// capacity) with an empty NDEF message: `03 00 FE` (type=NDEF Message, length=0, terminator) at
+/// the very front, zeros everywhere else. Just rewriting page4 alone would already make any
+/// standards-compliant NDEF reader see the tag as empty (a zero-length message means "stop
+/// here"), but it would leave the old content's bytes physically sitting on the later pages —
+/// invisible to NDEF parsing, but still showing up in a raw memory dump, which doesn't stop at
+/// the TLV terminator. Zeroing the whole declared area makes "erase"/"format" actually clear the
+/// data, matching what a raw dump shows, not just the pointer to it.
+fn zero_ndef_area(
+    port: &mut dyn SerialPort,
+    target_number: u8,
+    capacity_bytes: u32,
+) -> Result<(), Pn532Error> {
+    let mut area = vec![0u8; capacity_bytes as usize];
+    area[0] = 0x03;
+    area[1] = 0x00;
+    area[2] = 0xFE;
+    for (i, page_bytes) in area.chunks_exact(4).enumerate() {
+        let page = 4u8.wrapping_add(i as u8);
+        ntag_write_page(port, target_number, page, page_bytes.try_into().unwrap())?;
+    }
+    Ok(())
+}
+
+/// Format a blank (or previously-written) Ultralight/NTAG card into NFC Forum Type 2 Tag / NDEF
+/// format: writes a fresh Capability Container (page3), sized for the detected chip model, then
+/// zeros the whole NDEF data area that CC declares (see [`zero_ndef_area`]). Unlike
+/// [`write_ndef`]/[`erase_ntag`], this doesn't require an existing CC — that's the whole point,
+/// it's how a never-formatted tag gets one in the first place — but it does require the exact
+/// chip model to be identified via GET_VERSION, since the correct CC capacity byte depends on it
+/// and there's no safe generic default to fall back to.
+///
+/// `password` follows the same contract as `write_ndef`: only needed if the card currently has
+/// write-password protection enabled, since page3 onward falls under that protection like any
+/// other write.
+pub fn format_ntag(
+    session: &SharedSession,
+    expected_uid: Option<&str>,
+    password: Option<&str>,
+) -> Result<(), Pn532Error> {
+    let pwd = password.map(parse_password_hex).transpose()?;
+
+    let mut guard = session.lock().expect("pn532 session mutex poisoned");
+    let conn = guard.as_mut().ok_or(Pn532Error::NotConnected)?;
+    let target = select_ntag_for_erase_or_format(conn, expected_uid, pwd, "format")?;
+
+    let (chip_model, _) = probe_ntag_version(&mut *conn.port, target.target_number, target.sak);
+    let chip_model = chip_model.ok_or_else(|| {
+        Pn532Error::InvalidFrame(
+            "Couldn't identify this tag's exact model; formatting isn't supported yet".into(),
+        )
+    })?;
+    let capacity_bytes = ndef_capacity_for_chip_model(&chip_model).ok_or_else(|| {
+        Pn532Error::InvalidFrame(
+            "This chip model's NDEF capacity isn't known; formatting isn't supported yet".into(),
+        )
+    })?;
+
+    let cc = [0xE1u8, 0x10, (capacity_bytes / 8) as u8, 0x00];
+    ntag_write_page(&mut *conn.port, target.target_number, 3, cc)?;
+    zero_ndef_area(&mut *conn.port, target.target_number, capacity_bytes)?;
+
+    Ok(())
+}
+
+/// Clear an already-formatted Ultralight/NTAG card's NDEF content, leaving the Capability
+/// Container (and thus the tag's NDEF-formatted status) untouched: zeros the whole NDEF data
+/// area the existing CC declares (see [`zero_ndef_area`]), without touching page3 itself.
+/// Requires an existing CC, same precondition as [`write_ndef`] — a tag that was never formatted
+/// has nothing to erase; it should be formatted instead.
+pub fn erase_ntag(
+    session: &SharedSession,
+    expected_uid: Option<&str>,
+    password: Option<&str>,
+) -> Result<(), Pn532Error> {
+    let pwd = password.map(parse_password_hex).transpose()?;
+
+    let mut guard = session.lock().expect("pn532 session mutex poisoned");
+    let conn = guard.as_mut().ok_or(Pn532Error::NotConnected)?;
+    let target = select_ntag_for_erase_or_format(conn, expected_uid, pwd, "erase")?;
+
+    let cc_page = ntag_read_page(&mut *conn.port, target.target_number, 3)?;
+    let cc = ndef::parse_capability_container(&cc_page).ok_or_else(|| {
+        Pn532Error::InvalidFrame(
+            "This tag doesn't have a Capability Container yet (not formatted); nothing to erase".into(),
+        )
+    })?;
+
+    zero_ndef_area(&mut *conn.port, target.target_number, cc.capacity_bytes)?;
 
     Ok(())
 }

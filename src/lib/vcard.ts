@@ -71,6 +71,11 @@ function splitVCardStructured(value: string): string[] {
  * out — there's always the raw record view to fall back on. */
 export function parseVCard(text: string): VCardFields {
   const fields: VCardFields = {};
+  // Some vCards — e.g. exported straight from a phone's contacts app, like the VERSION:3.0 one
+  // that motivated this — only carry FN, without a structured N line at all. Tracked separately
+  // (not written into `fields` directly) so N, if present, always wins regardless of which line
+  // comes first in the source text; see the fallback after the loop.
+  let fn: string | undefined;
   for (const rawLine of text.split(/\r\n|\r|\n/)) {
     const sep = rawLine.indexOf(":");
     if (sep === -1) continue;
@@ -84,6 +89,9 @@ export function parseVCard(text: string): VCardFields {
         if (given) fields.givenName = given;
         break;
       }
+      case "FN":
+        fn = unescapeVCardValue(value);
+        break;
       case "ADR": {
         const [, , street, city, state, postalCode, country] =
           splitVCardStructured(value).map(unescapeVCardValue);
@@ -140,6 +148,21 @@ export function parseVCard(text: string): VCardFields {
         break;
       default:
         break;
+    }
+  }
+  // No structured N (or N present but empty) — fall back to splitting FN so the name isn't
+  // silently dropped when this gets loaded back into the editable given/family name inputs
+  // (there's no single "full name" field to put it in as-is). Best-effort: the last
+  // whitespace-separated word becomes the family name and everything before it the given name,
+  // matching the "given family" order `buildVCard` itself writes FN in; a single-word FN has
+  // nowhere sensible to split, so it's kept whole as the given name.
+  if (!fields.familyName && !fields.givenName && fn?.trim()) {
+    const parts = fn.trim().split(/\s+/);
+    if (parts.length > 1) {
+      fields.familyName = parts.pop();
+      fields.givenName = parts.join(" ");
+    } else {
+      fields.givenName = parts[0];
     }
   }
   return fields;

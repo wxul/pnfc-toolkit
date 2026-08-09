@@ -130,7 +130,15 @@ function App() {
         </main>
       </div>
 
-      {devPanelOpen && <DevPanel onClose={() => setDevPanelOpen(false)} />}
+      {devPanelOpen && (
+        <DevPanel
+          onClose={() => setDevPanelOpen(false)}
+          card={conn.card}
+          detectionSeq={conn.detectionSeq}
+          requestPolling={conn.requestPolling}
+          setPollingPaused={conn.setPollingPaused}
+        />
+      )}
       {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
     </div>
   );

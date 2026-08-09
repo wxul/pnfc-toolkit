@@ -24,12 +24,13 @@ Linux/macOS 平台专属的那部分代码（比如串口友好名称查询）�
 - [x] **读取 UID / ATQA / SAK / 卡片类型** —— 支持 MIFARE Classic（1K/4K/Mini）和 MIFARE Ultralight/NTAG21x，通过 `GET_VERSION` 精确识别具体型号
 - [x] **完整内存 dump**（Ultralight/NTAG）—— 原始页面数据，加上 NDEF 消息解析（URI、纯文本、vCard、WiFi 记录）
 - [x] **MIFARE Classic 扇区访问** —— 逐扇区认证（内置默认密钥字典），以及区块数据查看
-- [x] **MIFARE Classic 卡片复制/克隆** —— 包括在可写 UID 的"magic"/CUID 卡上克隆 UID
+- [x] **卡片复制/克隆** —— MIFARE Classic（包括在可写 UID 的"magic"/CUID 卡上克隆 UID）和 NTAG/Ultralight（把源卡的 NDEF 内容原样字节级复制到每张放上的目标卡，不要求芯片型号完全一致）；会校验目标卡类型与源卡一致（Classic 复制到 Classic，NTAG 复制到 NTAG），类型不匹配的卡会被拒绝而不是硬写
 - [x] **写入 NDEF 记录** —— URL、纯文本、电话、短信、邮箱、地理位置、vCard 名片、WiFi 配置（WPS），多条记录会打包进同一条 NDEF 消息
 - [x] **NTAG/Ultralight 写密码保护** —— 设置、修改、取消
+- [x] **本地卡片库** —— 把读取到的卡片 NDEF 数据保存在本地，可浏览/删除已保存条目，并能一键加载到写入页面
+- [x] **格式化 / 删除标签**（Ultralight/NTAG）—— 把空白或用过的标签格式化成 NDEF 可用状态，或者清空一张已格式化标签的内容（保留其 Capability Container）
 - [x] **中英文界面** —— 标题栏随时可切换，选择会被记住
 - [x] **调试面板** —— 实时日志、原始协议帧查看器（可以隐藏后台轮询卡片产生的重复"心跳"帧）、串口探测工具，以及一个原始 `InDataExchange` 发送器，方便手动试探卡片支持哪些指令
-- [ ] **把空白标签格式化成 NDEF 格式** —— 现在写入要求标签本身已经有 Capability Container
 - [ ] **真正的硬件只读锁定**（OTP 锁位）—— 现在的"密码保护"只保护写入，而且是可逆的
 - [ ] **独立的"原始指令"页面** —— 目前给卡片发任意指令只能通过调试面板，还不是一个正式的功能页面
 - [ ] **MIFARE Classic 4K/Mini 真机验证** —— 扇区布局是照公开文档实现的，还没有在真实的 4K/Mini 硬件上测试过
@@ -37,6 +38,8 @@ Linux/macOS 平台专属的那部分代码（比如串口友好名称查询）�
 ## 硬件要求
 
 任何接成 **UART/USB 转串口模式**（不是 I2C 或 SPI）、波特率 115200 的 PN532 模块都应该能用，包括常见的 CH340 转串口板子。
+
+目前开发和测试使用的是一块 **PN532 v1.6** 模块，通过它板载的 **CH340** USB 转串口芯片经 USB 接入开发用电脑。
 
 ## 快速开始
 

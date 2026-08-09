@@ -48,7 +48,7 @@ export function DevicePage({
   }
 
   return (
-    <div className="mx-auto flex max-w-lg flex-col gap-4 pt-8">
+    <div className="mx-auto flex max-w-lg flex-col gap-4">
       {!connectedPort && scanState === "scanning" && (
         <p className="text-center text-sm text-muted-foreground">{t("device.scanning")}</p>
       )}

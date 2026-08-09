@@ -23,13 +23,16 @@ export function ClassicCopyFlow({
   const [copying, setCopying] = useState(false);
   const [results, setResults] = useState<ClassicCopyResult[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [wrongType, setWrongType] = useState(false);
   // The target card UID already handled — prevents a repeat write being triggered by another
   // poll detecting the same card again before it's been taken away.
   const lastHandledUidRef = useRef<string | null>(null);
 
   const isClassic = currentCard != null && (parseInt(currentCard.sel_res, 16) & 0x08) !== 0;
   const isNewTarget =
-    isClassic && currentCard!.uid !== sourceUid && currentCard!.uid !== lastHandledUidRef.current;
+    currentCard != null &&
+    currentCard.uid !== sourceUid &&
+    currentCard.uid !== lastHandledUidRef.current;
   const unlockedSectors = sourceSectors.filter((s) => s.key);
 
   // The card is already in place; as soon as it's detected, write immediately — no need for
@@ -47,6 +50,12 @@ export function ClassicCopyFlow({
   // actually triggers a write.
   useEffect(() => {
     if (!isNewTarget || copying) return;
+    if (!isClassic) {
+      lastHandledUidRef.current = currentCard!.uid;
+      setWrongType(true);
+      return;
+    }
+    setWrongType(false);
     let cancelled = false;
     const target = currentCard!;
     queueMicrotask(() => {
@@ -56,7 +65,7 @@ export function ClassicCopyFlow({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isNewTarget, currentCard?.uid]);
+  }, [isNewTarget, isClassic, currentCard?.uid]);
 
   // Restore the paused state too if the user navigates away mid-write (e.g. clicks "done").
   useEffect(() => {
@@ -114,7 +123,9 @@ export function ClassicCopyFlow({
           ? t("classicCopy.writing")
           : currentCard?.uid === sourceUid
             ? t("classicCopy.stillSourceCard")
-            : t("classicCopy.placeTargetCard")}
+            : wrongType
+              ? t("classicCopy.wrongCardType")
+              : t("classicCopy.placeTargetCard")}
       </p>
 
       {error && <p className="mt-2 text-sm text-destructive">{error}</p>}

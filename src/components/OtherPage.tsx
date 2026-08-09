@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { ChevronLeft, KeyRound, Save, type LucideIcon } from "lucide-react";
+import { ChevronLeft, Eraser, KeyRound, Save, type LucideIcon } from "lucide-react";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
 import type { CardInfo } from "@/lib/pn532Types";
 import type { RecordDraft } from "@/lib/writeRecords";
 import { PasswordToolPage } from "./PasswordToolPage";
 import { SavedCardsPage } from "./SavedCardsPage";
+import { TagToolPage } from "./TagToolPage";
 
 interface ToolDef {
   id: string;
@@ -27,6 +28,12 @@ const TOOLS: ToolDef[] = [
     icon: Save,
     titleKey: "other.toolSavedTitle",
     descriptionKey: "other.toolSavedDesc",
+  },
+  {
+    id: "tag",
+    icon: Eraser,
+    titleKey: "other.toolTagTitle",
+    descriptionKey: "other.toolTagDesc",
   },
 ];
 
@@ -64,8 +71,8 @@ export function OtherPage({
     // a short form and reads better kept narrow and centered like the rest of the app's forms.
     const wrapperClass =
       selectedTool === "saved"
-        ? "flex w-full flex-col gap-3 pt-8"
-        : "mx-auto flex max-w-lg flex-col gap-3 pt-8";
+        ? "flex w-full flex-col gap-3"
+        : "mx-auto flex max-w-lg flex-col gap-3";
     return (
       <div className={wrapperClass}>
         <button
@@ -86,12 +93,22 @@ export function OtherPage({
           />
         )}
         {selectedTool === "saved" && <SavedCardsPage onWrite={onWriteRecords} />}
+        {selectedTool === "tag" && (
+          <TagToolPage
+            connectedPort={connectedPort}
+            card={card}
+            detectionSeq={detectionSeq}
+            active={active}
+            setPollingPaused={setPollingPaused}
+            requestPolling={requestPolling}
+          />
+        )}
       </div>
     );
   }
 
   return (
-    <div className="mx-auto flex max-w-lg flex-col gap-3 pt-8">
+    <div className="mx-auto flex max-w-lg flex-col gap-3">
       <p className="text-sm text-muted-foreground">{t("other.intro")}</p>
       <div className="flex flex-col gap-2">
         {TOOLS.map((tool) => {

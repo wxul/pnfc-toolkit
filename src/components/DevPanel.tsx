@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useDevLogs } from "../hooks/useDevLogs";
 import { clearLogs, logFrontend, type LogEntry, type LogSource } from "../lib/devLog";
+import type { CardInfo } from "../lib/pn532Types";
+import { RawFrameSenderTab } from "./RawFrameSenderTab";
 import "./DevPanel.css";
 
 interface SerialPortSummary {
@@ -23,7 +25,7 @@ interface Pn532Info {
   support: number;
 }
 
-type Tab = "logs" | "frames" | "serial";
+type Tab = "logs" | "frames" | "serial" | "raw";
 
 const SOURCE_LABEL: Record<LogSource, string> = {
   frontend: "Frontend",
@@ -66,37 +68,53 @@ function parseFrameBytes(message: string): number[] | null {
  * over and over, which floods the frame/log view with a TX + ACK + response triplet every half
  * second — drowning out the frames that actually matter while debugging something else. This
  * walks the frame log in order and marks every entry belonging to one of these exchanges (the
- * TX itself, plus the ACK and response that immediately follow it), so the UI can filter them
- * out on request.
+ * TX itself, plus the ACK and response that follow it), so the UI can filter them out on
+ * request.
  *
- * A TX frame is identified as InListPassiveTarget by its command byte; the ACK/response that
- * come right after are attributed to that same exchange without inspecting their content —
- * every `send_command` call on the Rust side logs exactly one TX, one ACK, one response, in
- * that order, and the session's mutex means two exchanges can never interleave, so pairing by
- * strict sequence is reliable.
+ * A TX frame is identified as InListPassiveTarget by its command byte; every RX frame after it
+ * is attributed to that same exchange until the next TX frame shows up. This deliberately
+ * re-evaluates `currentIsHeartbeat` from the actual content of *every* TX frame, rather than
+ * counting "1 TX, then 2 RX, then reset" by position — an earlier version did exactly that
+ * fixed-position counting, and it quietly broke on real hardware: any single exchange that logs
+ * fewer than its usual 3 lines (e.g. `read_ack` timing out partway through a retry, which the
+ * rest of this codebase already documents as a real occurrence over serial) throws the count
+ * permanently out of sync with reality, misclassifying everything logged afterward for the rest
+ * of the session — which is exactly why the checkbox looked like it had no effect. Keying off
+ * each TX frame's own bytes instead makes this self-resynchronizing: a dropped ACK/response
+ * only affects that one exchange, never anything past it.
  */
 function findHeartbeatFrameIds(entries: LogEntry[]): Set<number> {
   const heartbeatIds = new Set<number>();
   let currentIsHeartbeat = false;
-  let step: 0 | 1 | 2 = 0; // 0 = expecting a TX, 1 = expecting its ACK, 2 = expecting its response
 
   for (const entry of entries) {
     if (entry.source !== "rust" || entry.target !== "pn532::frame") continue;
     const bytes = parseFrameBytes(entry.message);
     if (!bytes) continue;
 
-    if (step === 0) {
+    if (entry.message.startsWith("TX ")) {
       currentIsHeartbeat = bytes[5] === HOST_TO_PN532 && bytes[6] === CMD_IN_LIST_PASSIVE_TARGET;
-      step = 1;
-    } else {
-      step = step === 1 ? 2 : 0;
     }
     if (currentIsHeartbeat) heartbeatIds.add(entry.id);
   }
   return heartbeatIds;
 }
 
-export function DevPanel({ onClose }: { onClose: () => void }) {
+export function DevPanel({
+  onClose,
+  card,
+  detectionSeq,
+  requestPolling,
+  setPollingPaused,
+}: {
+  onClose: () => void;
+  /** Threaded through to the Raw tab's command sender, which needs live card detection to know
+   * when to actually send — the rest of the Dev panel doesn't touch card state. */
+  card: CardInfo | null;
+  detectionSeq: number;
+  requestPolling: (id: string, want: boolean) => void;
+  setPollingPaused: (paused: boolean) => void;
+}) {
   const [tab, setTab] = useState<Tab>("logs");
   // Shared across the Logs and Frames tabs — it's the same underlying noise either way, no
   // reason to make the user set it twice.
@@ -125,6 +143,9 @@ export function DevPanel({ onClose }: { onClose: () => void }) {
             <button className={tab === "serial" ? "active" : ""} onClick={() => setTab("serial")}>
               Serial
             </button>
+            <button className={tab === "raw" ? "active" : ""} onClick={() => setTab("raw")}>
+              Raw
+            </button>
           </div>
           <button className="dev-panel-close" onClick={onClose} aria-label="Close">
             ✕
@@ -134,6 +155,14 @@ export function DevPanel({ onClose }: { onClose: () => void }) {
           {tab === "logs" && <LogsTab hideHeartbeat={hideHeartbeat} setHideHeartbeat={setHideHeartbeat} />}
           {tab === "frames" && <FramesTab hideHeartbeat={hideHeartbeat} setHideHeartbeat={setHideHeartbeat} />}
           {tab === "serial" && <SerialTab />}
+          {tab === "raw" && (
+            <RawFrameSenderTab
+              card={card}
+              detectionSeq={detectionSeq}
+              requestPolling={requestPolling}
+              setPollingPaused={setPollingPaused}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -155,8 +184,14 @@ function LogsTab({
   });
   const heartbeatIds = useMemo(() => findHeartbeatFrameIds(logs), [logs]);
 
+  // Heartbeat detection above needs chronological (oldest-first) order to attribute each RX to
+  // the TX before it — the reverse for display (newest on top, so the latest entry doesn't
+  // require scrolling to see) happens only here, after that's already been computed.
   const filtered = useMemo(
-    () => logs.filter((l) => sources[l.source] && !(hideHeartbeat && heartbeatIds.has(l.id))),
+    () =>
+      logs
+        .filter((l) => sources[l.source] && !(hideHeartbeat && heartbeatIds.has(l.id)))
+        .reverse(),
     [logs, sources, hideHeartbeat, heartbeatIds],
   );
 
@@ -211,14 +246,17 @@ function FramesTab({
 }) {
   const logs = useDevLogs();
   const heartbeatIds = useMemo(() => findHeartbeatFrameIds(logs), [logs]);
+  // Same chronological-order-for-detection, reversed-only-for-display split as LogsTab above.
   const frames = useMemo(
     () =>
-      logs.filter(
-        (l) =>
-          l.source === "rust" &&
-          l.target === "pn532::frame" &&
-          !(hideHeartbeat && heartbeatIds.has(l.id)),
-      ),
+      logs
+        .filter(
+          (l) =>
+            l.source === "rust" &&
+            l.target === "pn532::frame" &&
+            !(hideHeartbeat && heartbeatIds.has(l.id)),
+        )
+        .reverse(),
     [logs, hideHeartbeat, heartbeatIds],
   );
 
@@ -253,58 +291,6 @@ function FramesTab({
           );
         })}
       </div>
-    </div>
-  );
-}
-
-function RawFrameSender() {
-  const [paramsHex, setParamsHex] = useState("");
-  const [sending, setSending] = useState(false);
-  const [result, setResult] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  async function send() {
-    const hex = paramsHex.trim();
-    if (!hex) return;
-    setSending(true);
-    setResult(null);
-    setError(null);
-    logFrontend("info", `Sending custom InDataExchange frame: ${hex}`);
-    try {
-      const resp = await invoke<string>("send_raw_data_exchange", { paramsHex: hex });
-      setResult(resp);
-      logFrontend("info", `Custom frame response: ${resp}`);
-    } catch (e) {
-      setError(String(e));
-      logFrontend("error", `Failed to send custom frame: ${String(e)}`);
-    } finally {
-      setSending(false);
-    }
-  }
-
-  return (
-    <div className="raw-frame-sender">
-      <p className="raw-frame-hint">
-        For debugging: select a card once, then send the hex bytes below verbatim as
-        InDataExchange parameters (without the D4/40 fixed prefix — start from the target
-        number), e.g. fill in <code>011BFFFFFFFF</code> to test PWD_AUTH, or{" "}
-        <code>011A00</code> to test Ultralight C's AUTHENTICATE. The complete raw frame also gets
-        logged to the "Frames" tab.
-      </p>
-      <div className="raw-frame-row">
-        <input
-          className="raw-frame-input"
-          placeholder="e.g. 011BFFFFFFFF"
-          value={paramsHex}
-          onChange={(e) => setParamsHex(e.target.value)}
-          disabled={sending}
-        />
-        <button onClick={send} disabled={sending || !paramsHex.trim()}>
-          {sending ? "Sending..." : "Send"}
-        </button>
-      </div>
-      {result && <p className="raw-frame-result ok">Response: {result}</p>}
-      {error && <p className="raw-frame-result fail">{error}</p>}
     </div>
   );
 }
@@ -428,7 +414,6 @@ function SerialTab() {
           )}
         </tbody>
       </table>
-      <RawFrameSender />
     </div>
   );
 }

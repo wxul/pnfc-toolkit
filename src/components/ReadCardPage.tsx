@@ -13,6 +13,7 @@ import {
 import { saveCard } from "@/lib/savedCards";
 import { ClassicSectorView } from "./ClassicSectorView";
 import { ClassicCopyFlow } from "./ClassicCopyFlow";
+import { NtagCopyFlow } from "./NtagCopyFlow";
 import { NtagDumpView } from "./NtagDumpView";
 import { InfoRow, formatUid } from "./CardInfoDisplay";
 
@@ -80,6 +81,7 @@ export function ReadCardPage({
   const [classicSectors, setClassicSectors] = useState<ClassicSectorInfo[]>([]);
   const [classicSourceUid, setClassicSourceUid] = useState<string | null>(null);
   const [copyOpen, setCopyOpen] = useState(false);
+  const [ntagCopyOpen, setNtagCopyOpen] = useState(false);
   // Briefly shows "saved" on the save button after a click, then reverts — cheap feedback
   // without a full toast system.
   const [justSaved, setJustSaved] = useState(false);
@@ -89,9 +91,9 @@ export function ReadCardPage({
   // continuous, multi-card operation, watching for each new target card swapped in). Both are
   // paused while the user isn't even looking at this page.
   useEffect(() => {
-    requestPolling("read", active && (phase === "waiting" || copyOpen));
+    requestPolling("read", active && (phase === "waiting" || copyOpen || ntagCopyOpen));
     return () => requestPolling("read", false);
-  }, [active, phase, copyOpen, requestPolling]);
+  }, [active, phase, copyOpen, ntagCopyOpen, requestPolling]);
 
   // Captures whichever card shows up first while `waiting` — including one already sitting on
   // the reader the moment "start reading" was clicked.
@@ -187,7 +189,7 @@ export function ReadCardPage({
 
   if (!connectedPort) {
     return (
-      <div className="mx-auto flex max-w-lg flex-col gap-4 pt-8">
+      <div className="mx-auto flex max-w-lg flex-col gap-4">
         <p className="text-center text-sm text-muted-foreground">{t("readCard.connectFirst")}</p>
       </div>
     );
@@ -195,7 +197,7 @@ export function ReadCardPage({
 
   if (phase === "idle") {
     return (
-      <div className="mx-auto flex max-w-lg flex-col items-center gap-4 pt-8">
+      <div className="mx-auto flex max-w-lg flex-col items-center gap-4">
         <p className="text-center text-sm text-muted-foreground">{t("readCard.idleHint")}</p>
         <button
           className="rounded-md border bg-secondary px-4 py-2 text-sm font-medium hover:bg-muted"
@@ -209,7 +211,7 @@ export function ReadCardPage({
 
   if (phase === "waiting") {
     return (
-      <div className="mx-auto flex max-w-lg flex-col items-center gap-4 pt-8">
+      <div className="mx-auto flex max-w-lg flex-col items-center gap-4">
         <p className="text-center text-sm text-muted-foreground">{t("readCard.waitingForCard")}</p>
         <button
           className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
@@ -229,7 +231,7 @@ export function ReadCardPage({
 
   if (family === "unsupported") {
     return (
-      <div className="mx-auto flex max-w-lg flex-col gap-4 pt-8">
+      <div className="mx-auto flex max-w-lg flex-col gap-4">
         <div className="flex justify-end">
           <button className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted" onClick={onClear}>
             {t("common.clear")}
@@ -245,8 +247,20 @@ export function ReadCardPage({
   if (family === "classic") {
     const unlockedCount = classicSectors.filter((s) => s.key).length;
     return (
-      <div className="mx-auto flex max-w-2xl flex-col gap-4 pt-8">
-        <div className="flex justify-end">
+      <div className="mx-auto flex max-w-2xl flex-col gap-4">
+        <div className="flex justify-end gap-2">
+          {!copyOpen && (
+            <button
+              className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted disabled:opacity-50"
+              onClick={() => {
+                setClassicSourceUid(activeCard.uid);
+                setCopyOpen(true);
+              }}
+              disabled={unlockedCount === 0}
+            >
+              {t("readCard.copyToAnotherCard")}
+            </button>
+          )}
           <button className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted" onClick={onClear}>
             {t("common.clear")}
           </button>
@@ -274,33 +288,19 @@ export function ReadCardPage({
             setPollingPaused={setPollingPaused}
           />
         ) : (
-          <>
-            <ClassicSectorView
-              card={activeCard}
-              onSectorsChange={setClassicSectors}
-              onScanComplete={() => setPhase("done")}
-              setPollingPaused={setPollingPaused}
-            />
-            <div className="flex justify-center gap-2">
-              <button
-                className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted disabled:opacity-50"
-                onClick={() => {
-                  setClassicSourceUid(activeCard.uid);
-                  setCopyOpen(true);
-                }}
-                disabled={unlockedCount === 0}
-              >
-                {t("readCard.copyToAnotherCard")}
-              </button>
-            </div>
-          </>
+          <ClassicSectorView
+            card={activeCard}
+            onSectorsChange={setClassicSectors}
+            onScanComplete={() => setPhase("done")}
+            setPollingPaused={setPollingPaused}
+          />
         )}
       </div>
     );
   }
 
   return (
-    <div className="mx-auto flex max-w-lg flex-col gap-4 pt-8">
+    <div className="mx-auto flex max-w-lg flex-col gap-4">
       <div className="flex justify-end gap-2">
         {dump && (
           <button
@@ -310,10 +310,28 @@ export function ReadCardPage({
             {justSaved ? t("readCard.savedFeedback") : t("readCard.saveData")}
           </button>
         )}
+        {dump && !ntagCopyOpen && (
+          <button
+            className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
+            onClick={() => setNtagCopyOpen(true)}
+          >
+            {t("readCard.copyToAnotherCard")}
+          </button>
+        )}
         <button className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted" onClick={onClear}>
           {t("common.clear")}
         </button>
       </div>
+
+      {dump && ntagCopyOpen && (
+        <NtagCopyFlow
+          sourceUid={activeCard.uid}
+          sourceMessageHex={dump.ndef_message_hex ?? ""}
+          currentCard={card}
+          onClose={() => setNtagCopyOpen(false)}
+          setPollingPaused={setPollingPaused}
+        />
+      )}
 
       <NtagDumpView
         dump={dump}

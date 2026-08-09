@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { logFrontend } from "@/lib/devLog";
 import { useI18n } from "@/lib/i18n";
 import { cardFamily, isValidPasswordHex, type CardInfo, type PasswordProtection } from "@/lib/pn532Types";
+import { Switch } from "@/components/ui/switch";
+import { buildVCard, type VCardFields } from "@/lib/vcard";
 import {
   buildContent,
   isDraftFilled,
@@ -46,6 +48,7 @@ function RecordFields({
         </div>
       );
     case "vcard": {
+      const rawMode = draft.fields.mode === "raw";
       const f = (key: string, placeholder: string, span = false) => (
         <input
           key={key}
@@ -56,29 +59,64 @@ function RecordFields({
           disabled={disabled}
         />
       );
+      function toggleMode() {
+        if (!rawMode) {
+          // Seed the raw text from whatever's already in the form, but only the first time —
+          // once there's raw text (typed by hand, or from loading an existing vCard), switching
+          // back and forth must never clobber it with a form rebuild.
+          if (!draft.fields.raw?.trim()) {
+            onChange("raw", buildVCard(draft.fields as VCardFields));
+          }
+          onChange("mode", "raw");
+        } else {
+          onChange("mode", "form");
+        }
+      }
       return (
-        <div className="grid grid-cols-2 gap-2">
-          {f("familyName", t("write.vcardFamilyName"))}
-          {f("givenName", t("write.vcardGivenName"))}
-          {f("nickname", t("write.vcardNickname"))}
-          {f("org", t("write.vcardOrg"))}
-          {f("title", t("write.vcardTitle"))}
-          {f("role", t("write.vcardRole"))}
-          {f("phone", t("write.vcardPhone"))}
-          {f("email", t("write.vcardEmail"))}
-          {f("url", t("write.vcardUrl"), true)}
-          {f("adrStreet", t("write.vcardAdrStreet"), true)}
-          {f("adrCity", t("write.vcardAdrCity"))}
-          {f("adrState", t("write.vcardAdrState"))}
-          {f("adrPostalCode", t("write.vcardAdrPostalCode"))}
-          {f("adrCountry", t("write.vcardAdrCountry"))}
-          {f("label", t("write.vcardLabel"), true)}
-          {f("note", t("write.vcardNote"), true)}
-          {f("photo", t("write.vcardPhoto"), true)}
-          {f("logo", t("write.vcardLogo"), true)}
-          {f("bday", t("write.vcardBday"))}
-          {f("anniversary", t("write.vcardAnniversary"))}
-          {f("categories", t("write.vcardCategories"), true)}
+        <div className="flex flex-col gap-2">
+          <div className="flex justify-end">
+            <button
+              type="button"
+              className="text-xs text-muted-foreground hover:underline disabled:opacity-50"
+              onClick={toggleMode}
+              disabled={disabled}
+            >
+              {rawMode ? t("write.vcardSwitchToForm") : t("write.vcardSwitchToRaw")}
+            </button>
+          </div>
+          {rawMode ? (
+            <textarea
+              className={`${inputClass} min-h-[220px] resize-y font-mono text-xs`}
+              placeholder={t("write.vcardRawPlaceholder")}
+              value={draft.fields.raw ?? ""}
+              onChange={(e) => onChange("raw", e.target.value)}
+              disabled={disabled}
+            />
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              {f("familyName", t("write.vcardFamilyName"))}
+              {f("givenName", t("write.vcardGivenName"))}
+              {f("nickname", t("write.vcardNickname"))}
+              {f("org", t("write.vcardOrg"))}
+              {f("title", t("write.vcardTitle"))}
+              {f("role", t("write.vcardRole"))}
+              {f("phone", t("write.vcardPhone"))}
+              {f("email", t("write.vcardEmail"))}
+              {f("url", t("write.vcardUrl"), true)}
+              {f("adrStreet", t("write.vcardAdrStreet"), true)}
+              {f("adrCity", t("write.vcardAdrCity"))}
+              {f("adrState", t("write.vcardAdrState"))}
+              {f("adrPostalCode", t("write.vcardAdrPostalCode"))}
+              {f("adrCountry", t("write.vcardAdrCountry"))}
+              {f("label", t("write.vcardLabel"), true)}
+              {f("note", t("write.vcardNote"), true)}
+              {f("photo", t("write.vcardPhoto"), true)}
+              {f("logo", t("write.vcardLogo"), true)}
+              {f("bday", t("write.vcardBday"))}
+              {f("anniversary", t("write.vcardAnniversary"))}
+              {f("categories", t("write.vcardCategories"), true)}
+            </div>
+          )}
         </div>
       );
     }
@@ -297,7 +335,7 @@ export function WritePage({
 
   if (!connectedPort) {
     return (
-      <div className="mx-auto flex max-w-lg flex-col gap-4 pt-8">
+      <div className="mx-auto flex max-w-lg flex-col gap-4">
         <p className="text-center text-sm text-muted-foreground">{t("readCard.connectFirst")}</p>
       </div>
     );
@@ -306,7 +344,23 @@ export function WritePage({
   const locked = phase === "waiting";
 
   return (
-    <div className="mx-auto flex max-w-lg flex-col gap-3 pt-8">
+    <div className="mx-auto flex max-w-lg flex-col gap-3">
+      {phase === "waiting" && (
+        <div className="flex flex-col gap-2">
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+            {t("write.overwriteWarning")}
+          </div>
+          <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-1.5 text-sm">
+            <span className="flex-1 text-muted-foreground">
+              {busyUid ? t("write.writingInProgress", { uid: busyUid }) : t("write.waitingForCard")}
+            </span>
+            <button className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted" onClick={stopWaiting}>
+              {continuous ? t("write.stop") : t("common.cancel")}
+            </button>
+          </div>
+        </div>
+      )}
+
       {drafts.map((draft) => (
         <div key={draft.id} className="flex flex-col gap-2 rounded-md border p-3">
           <div className="flex items-center gap-2">
@@ -348,26 +402,19 @@ export function WritePage({
         {t("write.addRecord")}
       </button>
 
-      <div className="flex gap-2">
-        <button
-          className={`flex-1 rounded-md border px-3 py-1.5 text-sm disabled:opacity-50 ${
-            continuous ? "hover:bg-muted" : "bg-accent font-medium"
-          }`}
-          onClick={() => setContinuous(false)}
-          disabled={locked}
-        >
-          {t("write.modeSingle")}
-        </button>
-        <button
-          className={`flex-1 rounded-md border px-3 py-1.5 text-sm disabled:opacity-50 ${
-            continuous ? "bg-accent font-medium" : "hover:bg-muted"
-          }`}
-          onClick={() => setContinuous(true)}
-          disabled={locked}
-        >
-          {t("write.modeContinuous")}
-        </button>
-      </div>
+      {/* A settings toggle, not an action button — flipping it doesn't do anything by itself, it
+          only decides what the "write" button below will do once clicked. Labeling both states
+          explicitly (rather than just "continuous: on/off") keeps it readable without having to
+          infer what the current position means. */}
+      <label className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+        <span className="flex flex-col">
+          <span className="text-sm font-medium">
+            {continuous ? t("write.modeContinuous") : t("write.modeSingle")}
+          </span>
+          <span className="text-xs text-muted-foreground">{t("write.modeLabel")}</span>
+        </span>
+        <Switch checked={continuous} onCheckedChange={setContinuous} disabled={locked} />
+      </label>
 
       <input
         className="rounded-md border bg-background px-3 py-1.5 text-sm font-mono disabled:opacity-50"
@@ -377,7 +424,7 @@ export function WritePage({
         disabled={locked}
       />
 
-      {phase === "idle" ? (
+      {phase === "idle" && (
         <button
           className="rounded-md border bg-secondary px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
           onClick={startWaiting}
@@ -385,23 +432,6 @@ export function WritePage({
         >
           {continuous ? t("write.startContinuous") : t("write.writeButton")}
         </button>
-      ) : (
-        <div className="flex flex-col gap-2">
-          <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-            {t("write.overwriteWarning")}
-          </div>
-          <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-1.5 text-sm">
-            <span className="flex-1 text-muted-foreground">
-              {busyUid ? t("write.writingInProgress", { uid: busyUid }) : t("write.waitingForCard")}
-            </span>
-            <button
-              className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted"
-              onClick={stopWaiting}
-            >
-              {continuous ? t("write.stop") : t("common.cancel")}
-            </button>
-          </div>
-        </div>
       )}
 
       {log.length > 0 && (

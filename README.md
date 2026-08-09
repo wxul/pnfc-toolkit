@@ -24,12 +24,13 @@ The Linux/macOS-specific code paths (serial port friendly-name lookup, etc.) wer
 - [x] **Read UID / ATQA / SAK / card type** — MIFARE Classic (1K/4K/Mini) and MIFARE Ultralight/NTAG21x, with exact model detection via `GET_VERSION`
 - [x] **Full memory dump** (Ultralight/NTAG) — raw page dump plus NDEF message parsing (URI, Text, vCard, WiFi records)
 - [x] **MIFARE Classic sector access** — per-sector authentication using a built-in default key dictionary, plus a block data viewer
-- [x] **MIFARE Classic card copy/clone** — including UID cloning on writable "magic"/CUID cards
+- [x] **Card copy/clone** — MIFARE Classic (including UID cloning on writable "magic"/CUID cards) and NTAG/Ultralight (copies the source's NDEF content byte-for-byte onto each target placed, no exact chip-model match required); write-target type is checked against the source (Classic→Classic, NTAG→NTAG) and a mismatched card is rejected instead of silently attempted
 - [x] **Write NDEF records** — URL, plain text, phone, SMS, email, geolocation, vCard business card, or WiFi credentials (WPS); multiple records get packed into a single NDEF message
 - [x] **NTAG/Ultralight write-password protection** — set, change, or remove
+- [x] **Saved card library** — save a read card's NDEF data locally, browse/delete saved entries, and reload one straight into the write page
+- [x] **Format / erase tag** (Ultralight/NTAG) — format a blank or previously-used tag into NDEF-ready state, or erase an already-formatted tag's content while keeping its Capability Container
 - [x] **Bilingual UI** — English/Chinese, switchable at runtime from the title bar; the choice is remembered
 - [x] **Dev panel** — live log viewer, raw protocol frame inspector (with an option to hide the repetitive card-presence "heartbeat" polling frames), serial port prober, and a raw `InDataExchange` sender for manually probing card commands
-- [ ] **Format a blank tag into NDEF format** — writing currently requires the tag to already have a Capability Container
 - [ ] **True hardware read-only locking** (OTP lock bits) — the existing "password protection" only protects writes and is reversible
 - [ ] **Dedicated "raw command" page** — sending arbitrary commands to a card is currently only available through the Dev panel, not as a first-class feature page
 - [ ] **MIFARE Classic 4K/Mini verified on real hardware** — the sector layout is implemented per public documentation, but hasn't actually been tested against physical 4K/Mini cards yet
@@ -37,6 +38,8 @@ The Linux/macOS-specific code paths (serial port friendly-name lookup, etc.) wer
 ## Hardware
 
 Any PN532 breakout board wired for **UART/USB-serial mode** (not I2C or SPI) at 115200 baud should work — including the common CH340-based USB-to-serial boards.
+
+Development and testing is being done against a **PN532 v1.6** module, connected to the development PC over USB via its onboard **CH340** USB-to-serial chip.
 
 ## Getting started
 

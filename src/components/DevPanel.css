@@ -307,16 +307,14 @@
   cursor: help;
 }
 
-/* Raw frame sender (custom InDataExchange frame, for debugging) */
-.raw-frame-sender {
-  flex-shrink: 0;
+/* Raw command sender tab (custom InDataExchange frame, for debugging) */
+.raw-tab {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-  padding: 0.6rem;
-  border: 1px solid var(--dp-border);
-  border-radius: 6px;
-  background: var(--dp-bg-alt);
+  min-height: 0;
+  padding: 0.6rem 0.9rem;
+  gap: 0.5rem;
 }
 
 .raw-frame-hint {
@@ -350,17 +348,51 @@
   padding: 0.35rem 0.8rem;
 }
 
-.raw-frame-result {
+.rfs-status {
   margin: 0;
+  font-size: 0.8rem;
+  color: var(--dp-text-dim);
+}
+
+.rfs-history {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 3rem;
+  max-height: 40vh;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
+  border: 1px solid var(--dp-border);
+  border-radius: 6px;
+  background: var(--dp-bg-alt);
+}
+
+.rfs-history-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.3rem 0.6rem;
+  border-bottom: 1px solid var(--dp-border);
   word-break: break-all;
 }
 
-.raw-frame-result.ok {
+.rfs-history-row:last-child {
+  border-bottom: none;
+}
+
+.rfs-history-time {
+  color: var(--dp-text-dim);
+  flex-shrink: 0;
+}
+
+.rfs-history-sent {
+  flex-shrink: 0;
+  color: #5b8ff9;
+}
+
+.rfs-history-row.ok .rfs-history-message {
   color: #4caf7d;
 }
 
-.raw-frame-result.fail {
+.rfs-history-row.fail .rfs-history-message {
   color: #e05c5c;
 }

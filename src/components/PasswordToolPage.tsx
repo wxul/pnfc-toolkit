@@ -147,7 +147,7 @@ export function PasswordToolPage({
 
   if (!connectedPort) {
     return (
-      <div className="mx-auto flex max-w-lg flex-col gap-4 pt-8">
+      <div className="mx-auto flex max-w-lg flex-col gap-4">
         <p className="text-center text-sm text-muted-foreground">{t("readCard.connectFirst")}</p>
       </div>
     );
@@ -155,7 +155,7 @@ export function PasswordToolPage({
 
   if (phase === "waiting") {
     return (
-      <div className="mx-auto flex max-w-lg flex-col items-center gap-4 pt-8">
+      <div className="mx-auto flex max-w-lg flex-col items-center gap-4">
         <p className="text-center text-sm text-muted-foreground">
           {action === "set" ? t("pwdTool.waitingToSet") : t("pwdTool.waitingToClear")}
         </p>
@@ -168,7 +168,7 @@ export function PasswordToolPage({
 
   if (phase === "processing") {
     return (
-      <div className="mx-auto flex max-w-lg flex-col items-center gap-4 pt-8">
+      <div className="mx-auto flex max-w-lg flex-col items-center gap-4">
         <p className="text-center text-sm text-muted-foreground">{t("common.processing")}</p>
       </div>
     );
@@ -176,7 +176,7 @@ export function PasswordToolPage({
 
   if (phase === "done") {
     return (
-      <div className="mx-auto flex max-w-lg flex-col items-center gap-4 pt-8">
+      <div className="mx-auto flex max-w-lg flex-col items-center gap-4">
         <p className={`text-center text-sm ${result?.ok ? "text-green-600" : "text-destructive"}`}>
           {result?.message}
           {result && <span className="ml-1 font-mono text-xs text-muted-foreground">({result.uid})</span>}
@@ -192,7 +192,7 @@ export function PasswordToolPage({
   }
 
   return (
-    <div className="mx-auto flex max-w-lg flex-col gap-3 pt-8">
+    <div className="mx-auto flex max-w-lg flex-col gap-3">
       <p className="text-sm text-muted-foreground">{t("pwdTool.intro")}</p>
 
       <div className="flex gap-2">

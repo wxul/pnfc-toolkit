@@ -43,14 +43,14 @@ export function SavedCardsPage({
 
   if (cards.length === 0) {
     return (
-      <div className="flex w-full flex-col gap-4 pt-8">
+      <div className="flex w-full flex-col gap-4">
         <p className="text-center text-sm text-muted-foreground">{t("savedCards.empty")}</p>
       </div>
     );
   }
 
   return (
-    <div className="flex w-full flex-col gap-2 pt-8">
+    <div className="flex w-full flex-col gap-2">
       {cards.map((c) => {
         const expanded = expandedId === c.id;
         return (

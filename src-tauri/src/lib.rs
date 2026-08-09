@@ -165,6 +165,61 @@ async fn write_ndef(
     .map_err(|e| e.to_string())
 }
 
+/// Copy another NTAG/Ultralight card's NDEF content (as raw hex bytes read via
+/// `dump_card_memory`) onto whatever card is currently on the reader. Rejects a target that
+/// isn't NTAG/Ultralight, or that's still the source card itself (same UID) — the frontend calls
+/// this once per new target card placed while the copy flow is open, same shape as
+/// `copy_classic_card`.
+#[tauri::command]
+async fn copy_ntag_card(
+    session: tauri::State<'_, SessionSlot>,
+    source_uid: String,
+    source_message_hex: String,
+    password: Option<String>,
+) -> Result<(), String> {
+    let current = pn532::session::current_session(&session);
+    run_blocking(move || {
+        pn532::tags::ntag21x::copy_ntag_card(&current, &source_uid, &source_message_hex, password.as_deref())
+    })
+    .await?
+    .map_err(|e| e.to_string())
+}
+
+/// Format a blank (or previously-written) Ultralight/NTAG card into NDEF format: writes a fresh
+/// Capability Container sized for the detected chip model, plus an empty NDEF message. Only
+/// NTAG21x/MIFARE Ultralight cards with an identifiable model are supported — anything else
+/// (MIFARE Classic, an unidentifiable model) surfaces as a normal error for the frontend to show.
+#[tauri::command]
+async fn format_ntag(
+    session: tauri::State<'_, SessionSlot>,
+    expected_uid: Option<String>,
+    password: Option<String>,
+) -> Result<(), String> {
+    let current = pn532::session::current_session(&session);
+    run_blocking(move || {
+        pn532::tags::ntag21x::format_ntag(&current, expected_uid.as_deref(), password.as_deref())
+    })
+    .await?
+    .map_err(|e| e.to_string())
+}
+
+/// Erase an already-formatted Ultralight/NTAG card's NDEF content (writes an empty NDEF message),
+/// leaving its Capability Container untouched. Fails if the card has no Capability Container yet
+/// (i.e. was never formatted) — use `format_ntag` for that case instead.
+#[tauri::command]
+async fn erase_ntag(
+    session: tauri::State<'_, SessionSlot>,
+    expected_uid: Option<String>,
+    password: Option<String>,
+) -> Result<(), String> {
+    let current = pn532::session::current_session(&session);
+    run_blocking(move || {
+        pn532::tags::ntag21x::erase_ntag(&current, expected_uid.as_deref(), password.as_deref())
+    })
+    .await?
+    .map_err(|e| e.to_string())
+}
+
 /// Set or change the write-password protection on an Ultralight/NTAG card (protects writes only,
 /// reads are unaffected). `current_password` is only needed if the card already has protection
 /// enabled (i.e. this is a password change); pass `None` for a first-time setup.
@@ -291,6 +346,9 @@ pub fn run() {
             read_card_uid,
             dump_card_memory,
             write_ndef,
+            copy_ntag_card,
+            format_ntag,
+            erase_ntag,
             set_ntag_password,
             clear_ntag_password,
             read_ntag_password_status,

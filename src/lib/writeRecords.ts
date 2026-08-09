@@ -32,7 +32,10 @@ export function buildContent(kind: RecordKind, fields: Record<string, string>): 
     case "geo":
       return `${fields.lat ?? ""},${fields.lng ?? ""}`;
     case "vcard":
-      return buildVCard(fields as VCardFields);
+      // "raw" mode is the escape hatch for anything the structured form can't represent (e.g.
+      // vCard 3.0's repeated TEL/EMAIL lines with TYPE= parameters) — the edited text is used
+      // verbatim instead of being rebuilt from the individual fields.
+      return fields.mode === "raw" ? (fields.raw ?? "") : buildVCard(fields as VCardFields);
     case "wifi":
       return `${fields.ssid ?? ""}\n${fields.password ?? ""}`;
     default:
@@ -45,7 +48,7 @@ export function isDraftFilled(kind: RecordKind, fields: Record<string, string>):
     case "geo":
       return !!fields.lat?.trim() && !!fields.lng?.trim();
     case "vcard":
-      return isVCardFilled(fields as VCardFields);
+      return fields.mode === "raw" ? !!fields.raw?.trim() : isVCardFilled(fields as VCardFields);
     case "wifi":
       return !!fields.ssid?.trim();
     default:
@@ -111,7 +114,13 @@ function recordToDraft(r: NdefRecordInfo): RecordDraft {
 
   if (r.tnf === 0x02 && r.type_name === "text/vcard") {
     const text = r.payload_text ?? new TextDecoder().decode(new Uint8Array(hexToBytes(r.payload_hex)));
-    return newDraft("vcard", parseVCard(text) as Record<string, string>);
+    // Defaults to raw-text mode: the structured form only covers one each of phone/email/etc.,
+    // so a vCard with anything beyond that (repeated TEL/EMAIL, TYPE= parameters, properties
+    // this app has no field for) would silently lose data if parsed into the structured fields
+    // and never touched again. Raw mode instead round-trips the original text byte-for-byte;
+    // the structured fields are still populated underneath (best-effort, via `parseVCard`) in
+    // case the user switches to the form view.
+    return newDraft("vcard", { ...(parseVCard(text) as Record<string, string>), raw: text, mode: "raw" });
   }
 
   if (r.tnf === 0x02 && r.type_name === "application/vnd.wfa.wsc") {
