@@ -132,6 +132,7 @@ pub fn parse_ndef_message(data: &[u8]) -> Vec<NdefRecordInfo> {
 
     while i < data.len() {
         let header = data[i];
+        let me = header & 0x40 != 0;
         let sr = header & 0x10 != 0;
         let il = header & 0x08 != 0;
         let tnf = header & 0x07;
@@ -182,6 +183,14 @@ pub fn parse_ndef_message(data: &[u8]) -> Vec<NdefRecordInfo> {
             uri,
         });
         index += 1;
+
+        // ME (Message End) marks the last record — anything after it (e.g. leftover zero
+        // padding within a TLV whose declared length is larger than the actual message, as
+        // written by some third-party tools/tags) isn't part of this message and must not be
+        // parsed as further records.
+        if me {
+            break;
+        }
     }
 
     records
@@ -404,6 +413,19 @@ mod tests {
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].uri.as_deref(), Some("https://a.example"));
         assert_eq!(records[1].type_name, "T");
+    }
+
+    #[test]
+    fn stops_at_message_end_and_ignores_trailing_padding() {
+        // A single real record (ME=1) followed by trailing zero bytes — as if the NDEF TLV's
+        // declared length were padded past the actual message, e.g. by a third-party writer
+        // reserving a larger fixed block than the message needs.
+        let mut message = build_message(&[text_record("hi")]);
+        message.extend_from_slice(&[0u8; 12]);
+
+        let records = parse_ndef_message(&message);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].type_name, "T");
     }
 
     #[test]
