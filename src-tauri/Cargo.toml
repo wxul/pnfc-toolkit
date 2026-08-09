@@ -1,6 +1,6 @@
 [package]
 name = "pnfc-toolkit"
-version = "0.1.0"
+version = "0.1.1"
 description = "A cross-platform NFC reader/writer toolkit — currently built for the PN532 module; support for other NFC controller chips (e.g. PN7160) may be added in the future."
 authors = ["wxul"]
 edition = "2021"
