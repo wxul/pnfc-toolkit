@@ -27,6 +27,13 @@ const NTAG_CMD_WRITE: u8 = 0xA2;
 /// the card just NAKs (which shows up in InDataExchange as a non-0x00 status byte) — same
 /// failure-detection pattern as every other read/write.
 const NTAG_CMD_PWD_AUTH: u8 = 0x1B;
+/// Originality signature / one-way counter / tearing-flag commands — only implemented by
+/// NTAG21x and Mifare Ultralight EV1 (original Ultralight, NTAG203, and Ultralight C don't
+/// support any of these three and just NAK); used for the read page's extra info section and to
+/// build a Flipper Zero–compatible `.nfc` export, which requires all of them.
+const NTAG_CMD_READ_SIG: u8 = 0x3C;
+const NTAG_CMD_READ_CNT: u8 = 0x39;
+const NTAG_CMD_CHECK_TEARING_EVENT: u8 = 0x3E;
 
 /// One READ returns 4 pages (16 bytes). Safety cap: when the model is unknown (GET_VERSION
 /// failed), the only way to tell reading is done is to hit a NAK, so this hard-caps the page
@@ -164,6 +171,10 @@ pub struct MemoryDump {
     /// so the config page can be located); `None` here means "couldn't determine", not
     /// "disabled".
     pub password_protection: Option<PasswordProtection>,
+    /// Signature/counter/tearing-flag data — `None` whenever GET_VERSION itself didn't succeed
+    /// (see `NtagSecurityData`'s doc comment for why a successful GET_VERSION doesn't guarantee
+    /// these are readable too).
+    pub security: Option<NtagSecurityData>,
 }
 
 /// GET_VERSION is only supported by the Ultralight/NTAG family (original Ultralight excepted)
@@ -186,23 +197,24 @@ fn probe_ntag_version(
     port: &mut dyn SerialPort,
     _target_number: u8,
     sak: u8,
-) -> (Option<String>, Option<String>) {
+) -> (Option<String>, Option<String>, Option<[u8; 8]>) {
     if sak != 0x00 {
-        return (None, None);
+        return (None, None, None);
     }
     match crate::pn532::session::send_with_retry(port, CMD_IN_COMMUNICATE_THRU, &[NTAG_CMD_GET_VERSION], 2) {
         Ok(resp) if resp.first() == Some(&0x00) => {
-            let result = decode_ntag_version(&resp[1..]);
+            let (model, memory_size) = decode_ntag_version(&resp[1..]);
             // Got a real reply, but it didn't match any entry in the model table — log the raw
             // bytes so a misdiagnosed card (unsupported command vs. genuinely unrecognized
             // response) is visible in the Logs tab instead of silently collapsing into "unknown".
-            if result.0.is_none() {
+            if model.is_none() {
                 log::debug!(
                     "GET_VERSION succeeded but didn't match any known model, raw reply: {}",
                     hex::encode(&resp)
                 );
             }
-            result
+            let version_bytes = resp.get(1..9).and_then(|b| b.try_into().ok());
+            (model, memory_size, version_bytes)
         }
         // A well-formed InDataExchange reply, but with a non-zero status byte — the PN532 itself
         // considers this exchange to have failed (e.g. the target never answered within its
@@ -212,12 +224,97 @@ fn probe_ntag_version(
                 "GET_VERSION exchange returned a non-success status, raw reply: {}",
                 hex::encode(&resp)
             );
-            (None, None)
+            (None, None, None)
         }
         Err(e) => {
             log::debug!("GET_VERSION exchange failed: {e}");
-            (None, None)
+            (None, None, None)
         }
+    }
+}
+
+/// Send a Type 2 Tag command via `InCommunicateThru` and unwrap a successful status byte — same
+/// hardware-quirk reasoning as `probe_ntag_version`/`pwd_auth` above (this hardware mishandles
+/// less-common Type 2 Tag commands via `InDataExchange`). Used for the three security-data reads
+/// below, all of which are uncommon enough to hit the same issue.
+fn ntag_communicate_thru(port: &mut dyn SerialPort, params: &[u8]) -> Result<Vec<u8>, Pn532Error> {
+    let resp = crate::pn532::session::send_with_retry(port, CMD_IN_COMMUNICATE_THRU, params, 2)?;
+    if resp.first() != Some(&0x00) {
+        return Err(Pn532Error::InvalidFrame(
+            "Command rejected or unsupported by this tag".into(),
+        ));
+    }
+    Ok(resp[1..].to_vec())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NtagSecurityData {
+    /// Raw 8-byte GET_VERSION reply, hex-encoded — kept alongside the already-decoded
+    /// `chip_model` because Flipper Zero's own `.nfc` file format wants these exact bytes back
+    /// verbatim (its "Mifare version" field), not a re-derived guess.
+    pub version_hex: String,
+    /// 32-byte NXP originality signature, hex-encoded; `None` if this chip doesn't implement
+    /// READ_SIG or the read failed.
+    pub signature_hex: Option<String>,
+    /// The one-way NFC counter's current value. NTAG21x and Ultralight EV1 only implement a
+    /// single counter, at index 2 (indices 0/1 always NAK on real hardware and aren't even
+    /// attempted — this matches what Flipper Zero's own firmware does for these chips); `None`
+    /// if this chip doesn't implement READ_CNT or the read failed.
+    pub counter: Option<u32>,
+    /// The tearing flag for that same counter (0xBD means no tearing event was ever detected);
+    /// `None` under the same conditions as `counter`.
+    pub tearing_flag: Option<u8>,
+}
+
+/// Only meaningful for a chip GET_VERSION already identified — `version` is that same successful
+/// reply, passed in rather than re-fetched. Each of the three reads fails independently and
+/// gracefully (`None`) rather than aborting the whole read; a chip that doesn't support any of
+/// them (original Ultralight, NTAG203, Ultralight C) just ends up with all three `None`, same
+/// spirit as `chip_model` itself.
+fn read_ntag_security_data(port: &mut dyn SerialPort, version: [u8; 8]) -> NtagSecurityData {
+    let signature_hex = match ntag_communicate_thru(port, &[NTAG_CMD_READ_SIG, 0x00]) {
+        Ok(r) if r.len() >= 32 => Some(hex::encode(&r[..32]).to_uppercase()),
+        Ok(r) => {
+            log::debug!("READ_SIG succeeded but reply was too short: {}", hex::encode(&r));
+            None
+        }
+        Err(e) => {
+            log::debug!("READ_SIG failed: {e}");
+            None
+        }
+    };
+
+    let counter = match ntag_communicate_thru(port, &[NTAG_CMD_READ_CNT, 0x02]) {
+        Ok(r) if r.len() >= 3 => Some(u32::from_le_bytes([r[0], r[1], r[2], 0])),
+        Ok(r) => {
+            log::debug!("READ_CNT succeeded but reply was too short: {}", hex::encode(&r));
+            None
+        }
+        Err(e) => {
+            log::debug!("READ_CNT failed: {e}");
+            None
+        }
+    };
+
+    let tearing_flag = match ntag_communicate_thru(port, &[NTAG_CMD_CHECK_TEARING_EVENT, 0x02]) {
+        Ok(r) => match r.first() {
+            Some(&b) => Some(b),
+            None => {
+                log::debug!("CHECK_TEARING_EVENT succeeded but reply was empty");
+                None
+            }
+        },
+        Err(e) => {
+            log::debug!("CHECK_TEARING_EVENT failed: {e}");
+            None
+        }
+    };
+
+    NtagSecurityData {
+        version_hex: hex::encode(version).to_uppercase(),
+        signature_hex,
+        counter,
+        tearing_flag,
     }
 }
 
@@ -232,7 +329,7 @@ pub fn dump_memory(session: &SharedSession) -> Result<Option<MemoryDump>, Pn532E
     let Some(target) = crate::pn532::session::select_target(&mut *conn.port)? else {
         return Ok(None);
     };
-    let (chip_model, memory_size) =
+    let (chip_model, memory_size, version_bytes) =
         probe_ntag_version(&mut *conn.port, target.target_number, target.sak);
 
     let mut pages = Vec::new();
@@ -339,6 +436,7 @@ pub fn dump_memory(session: &SharedSession) -> Result<Option<MemoryDump>, Pn532E
     } else {
         None
     };
+    let security = version_bytes.map(|v| read_ntag_security_data(&mut *conn.port, v));
 
     Ok(Some(MemoryDump {
         uid: hex::encode(&target.uid).to_uppercase(),
@@ -353,6 +451,7 @@ pub fn dump_memory(session: &SharedSession) -> Result<Option<MemoryDump>, Pn532E
         ndef_message_hex,
         ndef_records,
         password_protection,
+        security,
     }))
 }
 
@@ -497,7 +596,7 @@ fn select_ntag_for_password_op(
         )));
     }
 
-    let (chip_model, _) = probe_ntag_version(&mut *conn.port, target.target_number, target.sak);
+    let (chip_model, _, _) = probe_ntag_version(&mut *conn.port, target.target_number, target.sak);
     let total = total_pages_for(&chip_model).ok_or_else(|| {
         Pn532Error::InvalidFrame("Couldn't identify this tag's exact model; password protection isn't supported yet".into())
     })?;
@@ -622,7 +721,7 @@ pub fn read_ntag_password_status(
     if target.sak != 0x00 {
         return Ok(None);
     }
-    let (chip_model, _) = probe_ntag_version(&mut *conn.port, target.target_number, target.sak);
+    let (chip_model, _, _) = probe_ntag_version(&mut *conn.port, target.target_number, target.sak);
     let Some(total) = total_pages_for(&chip_model) else {
         return Ok(None);
     };
@@ -911,7 +1010,7 @@ pub fn format_ntag(
     let conn = guard.as_mut().ok_or(Pn532Error::NotConnected)?;
     let target = select_ntag_for_erase_or_format(conn, expected_uid, pwd, "format")?;
 
-    let (chip_model, _) = probe_ntag_version(&mut *conn.port, target.target_number, target.sak);
+    let (chip_model, _, _) = probe_ntag_version(&mut *conn.port, target.target_number, target.sak);
     let chip_model = chip_model.ok_or_else(|| {
         Pn532Error::InvalidFrame(
             "Couldn't identify this tag's exact model; formatting isn't supported yet".into(),

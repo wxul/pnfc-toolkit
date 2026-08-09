@@ -101,6 +101,23 @@ const en = {
     'A few pages failed to read and were skipped during the read (the rows showing "????????" in the table) — the rest were read normally; leaving the card in place will retry automatically.',
   "readCard.truncatedUnknownModel":
     "The model couldn't be identified, so there's no way to tell whether the end of the card was reached — the read stopped early here, there may be more unread pages.",
+  "readCard.fieldChipVersion": "Chip version",
+  "readCard.fieldSignature": "Originality signature",
+  "readCard.fieldCounter": "One-way counter",
+  "readCard.fieldTearingFlag": "Tearing flag",
+  "readCard.tearingOk": (p) => `0x${p.hex} (no tearing detected)`,
+  "readCard.tearingDetected": (p) => `0x${p.hex} (tearing detected)`,
+  "readCard.exportTxt": "Export as text (.txt)",
+  "readCard.exportFlipperNfc": "Export as Flipper (.nfc)",
+  "readCard.exportRawBinary": "Export raw memory (.bin)",
+  "readCard.exportFlipperUnavailable":
+    "Flipper export needs the chip model identified, a complete page read, and this chip's originality signature — at least one of those isn't available",
+  "readCard.saveTag": "Save tag",
+
+  "other.toolSavedTagsTitle": "Saved tags",
+  "other.toolSavedTagsDesc": "Browse full NTAG/Ultralight tag saves (every page, plus signature/counter data) and export them as text, Flipper, or raw binary.",
+
+  "savedTags.empty": 'Nothing saved yet — use "Save tag" on the read page after reading an NTAG card.',
 
   "classicSector.cardRemoved": "The card was removed",
   "classicSector.scanningProgress": (p) => `Scanning sector ${p.current}/${p.total}...`,
@@ -149,6 +166,9 @@ const en = {
   "common.processing": "Working...",
 
   "common.delete": "Delete",
+  "common.export": "Export",
+  "common.exported": "Exported",
+  "common.exportFailed": "Export failed",
 
   "write.kindUrl": "URL",
   "write.kindText": "Plain text",
@@ -355,6 +375,23 @@ const zh: Record<TranslationKey, Entry> = {
     '读取过程中有个别页失败被跳过了（表格里数据是 "????????" 的那几行），其余页仍是正常读到的，卡还贴着的话会自动重试。',
   "readCard.truncatedUnknownModel":
     "型号没能识别出来，没法判断是不是已经读到卡片末尾，读取在这里提前停止了，可能还有更多页没读到。",
+  "readCard.fieldChipVersion": "芯片版本",
+  "readCard.fieldSignature": "原厂签名",
+  "readCard.fieldCounter": "单向计数器",
+  "readCard.fieldTearingFlag": "防拆标志",
+  "readCard.tearingOk": (p) => `0x${p.hex}（未检测到断电攻击）`,
+  "readCard.tearingDetected": (p) => `0x${p.hex}（检测到断电攻击）`,
+  "readCard.exportTxt": "导出为文本 (.txt)",
+  "readCard.exportFlipperNfc": "导出为 Flipper 格式 (.nfc)",
+  "readCard.exportRawBinary": "导出原始内存 (.bin)",
+  "readCard.exportFlipperUnavailable":
+    "导出 Flipper 格式需要识别出芯片型号、页面完整读取成功、并且读到原厂签名——至少有一项现在不满足",
+  "readCard.saveTag": "保存标签",
+
+  "other.toolSavedTagsTitle": "已保存标签",
+  "other.toolSavedTagsDesc": "查看完整保存的 NTAG/Ultralight 标签（含全部页面及签名/计数器数据），可导出为文本、Flipper 格式或原始二进制。",
+
+  "savedTags.empty": "还没有保存过任何标签——在读卡页读完一张 NTAG 卡后点“保存标签”。",
 
   "classicSector.cardRemoved": "卡片已移开",
   "classicSector.scanningProgress": (p) => `正在扫描第 ${p.current}/${p.total} 扇区...`,
@@ -400,6 +437,9 @@ const zh: Record<TranslationKey, Entry> = {
   "common.processing": "处理中...",
 
   "common.delete": "删除",
+  "common.export": "导出",
+  "common.exported": "已导出",
+  "common.exportFailed": "导出失败",
 
   "write.kindUrl": "URL",
   "write.kindText": "纯文本",
