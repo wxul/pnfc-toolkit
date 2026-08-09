@@ -13,6 +13,8 @@
     "core:window:allow-start-dragging",
     "core:window:allow-is-maximized",
     "opener:default",
-    "log:default"
+    "log:default",
+    "updater:default",
+    "process:allow-restart"
   ]
 }

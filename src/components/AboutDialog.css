@@ -87,3 +87,24 @@
   text-align: left;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
 }
+
+.about-update {
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--ad-border);
+}
+
+.about-update-btn {
+  font-size: 0.8rem;
+  padding: 0.4rem 0.9rem;
+}
+
+.about-update-status {
+  margin: 0 0 0.5rem;
+  color: var(--ad-text-dim);
+  font-size: 0.8rem;
+}
+
+.about-update-error {
+  color: #d64545;
+}

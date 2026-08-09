@@ -27,6 +27,8 @@ hex = "0.4.3"
 log = "0.4.33"
 thiserror = "2.0.19"
 tauri-plugin-log = "2.9.0"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 tokio = { version = "1", features = ["time"] }
 
 [target.'cfg(windows)'.dependencies]

@@ -261,6 +261,13 @@ const en = {
   "about.close": "Close",
   "about.description": "PN532 NFC debugging and operation tool",
   "about.version": "Version",
+  "about.checkUpdate": "Check for updates",
+  "about.checking": "Checking for updates...",
+  "about.upToDate": "You're on the latest version",
+  "about.updateAvailable": (p) => `New version available: ${p.version}`,
+  "about.installAndRestart": "Install and restart",
+  "about.downloading": "Downloading update...",
+  "about.updateError": "Failed to check for updates",
 } satisfies Record<string, Entry>;
 
 export type TranslationKey = keyof typeof en;
@@ -501,6 +508,13 @@ const zh: Record<TranslationKey, Entry> = {
   "about.close": "关闭",
   "about.description": "PN532 NFC 调试与操作工具",
   "about.version": "版本",
+  "about.checkUpdate": "检查更新",
+  "about.checking": "正在检查更新...",
+  "about.upToDate": "已是最新版本",
+  "about.updateAvailable": (p) => `发现新版本：${p.version}`,
+  "about.installAndRestart": "安装并重启",
+  "about.downloading": "正在下载更新...",
+  "about.updateError": "检查更新失败",
 };
 
 const dictionaries: Record<Locale, Record<TranslationKey, Entry>> = { en, zh };

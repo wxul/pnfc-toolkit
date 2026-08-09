@@ -16,12 +16,18 @@ export function AppMenubar({
   return (
     <Menubar className="h-full shrink-0 gap-0 rounded-none border-none bg-transparent p-0 shadow-none">
       <MenubarMenu>
-        <MenubarTrigger>Help</MenubarTrigger>
+        <MenubarTrigger className="text-xs text-muted-foreground">Help</MenubarTrigger>
         <MenubarContent className="w-auto min-w-fit whitespace-nowrap">
-          <MenubarItem className="whitespace-nowrap" onClick={onOpenDevPanel}>
+          <MenubarItem
+            className="whitespace-nowrap text-xs text-muted-foreground"
+            onClick={onOpenDevPanel}
+          >
             Development
           </MenubarItem>
-          <MenubarItem className="whitespace-nowrap" onClick={onOpenAbout}>
+          <MenubarItem
+            className="whitespace-nowrap text-xs text-muted-foreground"
+            onClick={onOpenAbout}
+          >
             About pnfc-toolkit
           </MenubarItem>
         </MenubarContent>
