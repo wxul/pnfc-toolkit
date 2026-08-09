@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { getName, getTauriVersion, getVersion } from "@tauri-apps/api/app";
-import { check, type Update } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
 import { useI18n } from "@/lib/i18n";
+import type { UseUpdateCheck } from "@/hooks/useUpdateCheck";
 import "./AboutDialog.css";
 
 interface AppInfo {
@@ -11,18 +10,19 @@ interface AppInfo {
   tauriVersion: string;
 }
 
-type UpdateState =
-  | { phase: "idle" }
-  | { phase: "checking" }
-  | { phase: "upToDate" }
-  | { phase: "available"; update: Update }
-  | { phase: "installing" }
-  | { phase: "error" };
-
-export function AboutDialog({ onClose }: { onClose: () => void }) {
+export function AboutDialog({
+  onClose,
+  updateCheck,
+}: {
+  onClose: () => void;
+  /** Owned by `App` (via `useUpdateCheck`) rather than this dialog, so the check runs once at
+   * app startup and its result is still there the next time this dialog is opened, instead of
+   * re-running (and forgetting the previous result) on every mount. */
+  updateCheck: UseUpdateCheck;
+}) {
   const { t } = useI18n();
   const [info, setInfo] = useState<AppInfo | null>(null);
-  const [updateState, setUpdateState] = useState<UpdateState>({ phase: "idle" });
+  const { state: updateState, recheck, install } = updateCheck;
 
   useEffect(() => {
     Promise.all([getName(), getVersion(), getTauriVersion()]).then(
@@ -35,26 +35,6 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
-
-  async function handleCheckUpdate() {
-    setUpdateState({ phase: "checking" });
-    try {
-      const update = await check();
-      setUpdateState(update ? { phase: "available", update } : { phase: "upToDate" });
-    } catch {
-      setUpdateState({ phase: "error" });
-    }
-  }
-
-  async function handleInstallUpdate(update: Update) {
-    setUpdateState({ phase: "installing" });
-    try {
-      await update.downloadAndInstall();
-      await relaunch();
-    } catch {
-      setUpdateState({ phase: "error" });
-    }
-  }
 
   return (
     <div className="about-backdrop" onClick={onClose}>
@@ -73,26 +53,23 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
         </dl>
 
         <div className="about-update">
-          {updateState.phase === "idle" && (
-            <button className="about-update-btn" onClick={handleCheckUpdate}>
-              {t("about.checkUpdate")}
-            </button>
-          )}
           {updateState.phase === "checking" && (
             <p className="about-update-status">{t("about.checking")}</p>
           )}
           {updateState.phase === "upToDate" && (
-            <p className="about-update-status">{t("about.upToDate")}</p>
+            <>
+              <p className="about-update-status">{t("about.upToDate")}</p>
+              <button className="about-update-btn" onClick={recheck}>
+                {t("about.recheckUpdate")}
+              </button>
+            </>
           )}
           {updateState.phase === "available" && (
             <>
               <p className="about-update-status">
                 {t("about.updateAvailable", { version: updateState.update.version })}
               </p>
-              <button
-                className="about-update-btn"
-                onClick={() => handleInstallUpdate(updateState.update)}
-              >
+              <button className="about-update-btn" onClick={() => install(updateState.update)}>
                 {t("about.installAndRestart")}
               </button>
             </>
@@ -101,7 +78,12 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
             <p className="about-update-status">{t("about.downloading")}</p>
           )}
           {updateState.phase === "error" && (
-            <p className="about-update-status about-update-error">{t("about.updateError")}</p>
+            <>
+              <p className="about-update-status about-update-error">{t("about.updateError")}</p>
+              <button className="about-update-btn" onClick={recheck}>
+                {t("about.recheckUpdate")}
+              </button>
+            </>
           )}
         </div>
       </div>

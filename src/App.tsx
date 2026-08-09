@@ -11,6 +11,7 @@ import { DevPanel } from "./components/DevPanel";
 import { AboutDialog } from "./components/AboutDialog";
 import { initDevLogBridge } from "./lib/devLog";
 import { usePn532Connection } from "./hooks/usePn532Connection";
+import { useUpdateCheck } from "./hooks/useUpdateCheck";
 import { useI18n } from "./lib/i18n";
 import type { RecordDraft } from "./lib/writeRecords";
 
@@ -21,6 +22,7 @@ function App() {
   const [aboutOpen, setAboutOpen] = useState(false);
   const [activePage, setActivePage] = useState<PageId>("device");
   const conn = usePn532Connection();
+  const updateCheck = useUpdateCheck();
   const { t } = useI18n();
   // Bumped every time the "clear" button is clicked — paired with the `key` on ReadCardPage
   // below, so React tears down and rebuilds the whole read page (and its children, like the
@@ -139,7 +141,7 @@ function App() {
           setPollingPaused={conn.setPollingPaused}
         />
       )}
-      {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
+      {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} updateCheck={updateCheck} />}
     </div>
   );
 }
