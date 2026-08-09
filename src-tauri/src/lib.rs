@@ -316,12 +316,33 @@ async fn copy_classic_card(
         .map_err(|e| e.to_string())
 }
 
+/// Write plain text to an arbitrary path (chosen by the user via the frontend's native "Save
+/// As" dialog) — used by the export-to-.txt feature on the read/saved-data pages. Bypasses the
+/// fs plugin's scope system entirely since the path already went through the user's own explicit
+/// choice in a native file dialog, same trust level as any other "Save As".
+#[tauri::command]
+async fn write_text_file(path: String, content: String) -> Result<(), String> {
+    run_blocking(move || std::fs::write(&path, content))
+        .await?
+        .map_err(|e| e.to_string())
+}
+
+/// Same as `write_text_file` but for arbitrary bytes (e.g. a raw memory-dump export) — plain
+/// text can't safely carry every possible byte value.
+#[tauri::command]
+async fn write_binary_file(path: String, content: Vec<u8>) -> Result<(), String> {
+    run_blocking(move || std::fs::write(&path, content))
+        .await?
+        .map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_log::Builder::new()
                 // The Webview target forwards log records to the frontend via events, for the
@@ -356,7 +377,9 @@ pub fn run() {
             read_ntag_password_status,
             send_raw_data_exchange,
             read_classic_sector,
-            copy_classic_card
+            copy_classic_card,
+            write_text_file,
+            write_binary_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

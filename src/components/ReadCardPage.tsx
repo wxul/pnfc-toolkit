@@ -11,6 +11,15 @@ import {
   type MemoryDump,
 } from "@/lib/pn532Types";
 import { saveCard } from "@/lib/savedCards";
+import { saveTag } from "@/lib/savedTags";
+import { exportCardAsText, exportCardAsRawBinary } from "@/lib/exportCard";
+import { canExportAsFlipperNfc, exportAsFlipperNfc } from "@/lib/flipperExport";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ClassicSectorView } from "./ClassicSectorView";
 import { ClassicCopyFlow } from "./ClassicCopyFlow";
 import { NtagCopyFlow } from "./NtagCopyFlow";
@@ -85,6 +94,10 @@ export function ReadCardPage({
   // Briefly shows "saved" on the save button after a click, then reverts — cheap feedback
   // without a full toast system.
   const [justSaved, setJustSaved] = useState(false);
+  // Same idea, for the separate "save tag" (full dump, not just NDEF) button.
+  const [justSavedTag, setJustSavedTag] = useState(false);
+  // Same idea as `justSaved`, for the export-to-.txt button.
+  const [exportState, setExportState] = useState<"idle" | "done" | "error">("idle");
 
   // Only two things on this page need live detection: actively waiting for the first card, and
   // the "copy to another card" flow (which — unlike the rest of this page — genuinely is a
@@ -185,6 +198,62 @@ export function ReadCardPage({
     logFrontend("info", `Saved ${activeCard.uid}'s NDEF data to the saved-data list`);
     setJustSaved(true);
     setTimeout(() => setJustSaved(false), 2000);
+  }
+
+  // Unlike `handleSaveData`, keeps the complete dump (every page, plus signature/counter data)
+  // so a saved entry can later be re-exported as Flipper `.nfc`/raw `.bin`, not just text — see
+  // `SavedTagsPage`.
+  function handleSaveTag() {
+    if (!activeCard || !dump) return;
+    saveTag({
+      uid: activeCard.uid,
+      sensRes: activeCard.sens_res,
+      selRes: activeCard.sel_res,
+      dump,
+    });
+    logFrontend("info", `Saved ${activeCard.uid}'s full dump to the saved-tags list`);
+    setJustSavedTag(true);
+    setTimeout(() => setJustSavedTag(false), 2000);
+  }
+
+  async function runExport(label: string, doExport: () => Promise<boolean>) {
+    try {
+      const didExport = await doExport();
+      if (!didExport) return; // User cancelled the save dialog.
+      logFrontend("info", `Exported ${activeCard?.uid}'s data (${label})`);
+      setExportState("done");
+    } catch (e) {
+      logFrontend("error", `Failed to export card data (${label}): ${String(e)}`);
+      setExportState("error");
+    } finally {
+      setTimeout(() => setExportState("idle"), 2000);
+    }
+  }
+
+  function handleExportTxt() {
+    if (!activeCard || !dump) return;
+    runExport("txt", () =>
+      exportCardAsText({
+        uid: activeCard.uid,
+        cardType: activeCard.card_type,
+        sensRes: activeCard.sens_res,
+        selRes: activeCard.sel_res,
+        ndefMessageHex: dump.ndef_message_hex,
+        ndefRecords: dump.ndef_records,
+      }),
+    );
+  }
+
+  function handleExportFlipperNfc() {
+    if (!activeCard || !dump) return;
+    runExport("Flipper .nfc", () =>
+      exportAsFlipperNfc(activeCard.uid, activeCard.sens_res, activeCard.sel_res, dump),
+    );
+  }
+
+  function handleExportRawBinary() {
+    if (!activeCard || !dump) return;
+    runExport("raw binary", () => exportCardAsRawBinary(activeCard.uid, dump));
   }
 
   if (!connectedPort) {
@@ -309,6 +378,41 @@ export function ReadCardPage({
           >
             {justSaved ? t("readCard.savedFeedback") : t("readCard.saveData")}
           </button>
+        )}
+        {dump && (
+          <button
+            className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
+            onClick={handleSaveTag}
+          >
+            {justSavedTag ? t("readCard.savedFeedback") : t("readCard.saveTag")}
+          </button>
+        )}
+        {dump && (
+          <DropdownMenu>
+            <DropdownMenuTrigger className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted">
+              {exportState === "done"
+                ? t("common.exported")
+                : exportState === "error"
+                  ? t("common.exportFailed")
+                  : t("common.export")}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-auto min-w-fit whitespace-nowrap">
+              <DropdownMenuItem className="whitespace-nowrap" onClick={handleExportTxt}>
+                {t("readCard.exportTxt")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="whitespace-nowrap"
+                disabled={!canExportAsFlipperNfc(dump)}
+                title={canExportAsFlipperNfc(dump) ? undefined : t("readCard.exportFlipperUnavailable")}
+                onClick={handleExportFlipperNfc}
+              >
+                {t("readCard.exportFlipperNfc")}
+              </DropdownMenuItem>
+              <DropdownMenuItem className="whitespace-nowrap" onClick={handleExportRawBinary}>
+                {t("readCard.exportRawBinary")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
         {dump && !ntagCopyOpen && (
           <button

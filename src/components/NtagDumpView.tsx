@@ -4,6 +4,17 @@ import type { MemoryDump } from "@/lib/pn532Types";
 import { InfoRow, formatUid } from "./CardInfoDisplay";
 import { NdefRecordList } from "./NdefRecordList";
 
+/** GET_VERSION's reply is [Header, VendorID, ProductType, Subtype, MajorVer, MinorVer,
+ * StorageSize, ProtocolType] — the only two bytes actually meaningful to show on their own
+ * (the rest either duplicate what `chip_model`/`manufacturer` already show, or aren't meaningful
+ * without a datasheet lookup table) are the chip's own major/minor firmware version. */
+function chipFirmwareVersion(versionHex: string): string | null {
+  if (versionHex.length < 12) return null;
+  const major = parseInt(versionHex.slice(8, 10), 16);
+  const minor = parseInt(versionHex.slice(10, 12), 16);
+  return Number.isNaN(major) || Number.isNaN(minor) ? null : `${major}.${minor}`;
+}
+
 function hexToAscii(hex: string): string {
   let out = "";
   for (let i = 0; i < hex.length; i += 2) {
@@ -44,6 +55,7 @@ export function NtagDumpView({
   const usedBytes = dump?.ndef_message_hex ? dump.ndef_message_hex.length / 2 : 0;
   const description = ["NFC-A", hasNdefTlv ? "Ndef" : undefined].filter(Boolean).join(",");
   const pwd = dump?.password_protection;
+  const security = dump?.security;
 
   return (
     <>
@@ -72,6 +84,30 @@ export function NtagDumpView({
               pwd.enabled
                 ? t("readCard.passwordEnabled", { auth0: pwd.auth0.toString(16).toUpperCase().padStart(2, "0") })
                 : t("readCard.passwordDisabled", { auth0: pwd.auth0.toString(16).toUpperCase().padStart(2, "0") })
+            }
+          />
+        )}
+        {security && chipFirmwareVersion(security.version_hex) && (
+          <InfoRow label={t("readCard.fieldChipVersion")} value={chipFirmwareVersion(security.version_hex)!} />
+        )}
+        {security?.signature_hex && (
+          <div className="border-t px-3 py-2 text-sm first:border-t-0">
+            <p className="font-medium">{t("readCard.fieldSignature")}</p>
+            <p className="mt-1 font-mono text-xs break-all text-right text-muted-foreground">
+              {security.signature_hex}
+            </p>
+          </div>
+        )}
+        {security?.counter != null && (
+          <InfoRow label={t("readCard.fieldCounter")} value={security.counter.toString()} />
+        )}
+        {security?.tearing_flag != null && (
+          <InfoRow
+            label={t("readCard.fieldTearingFlag")}
+            value={
+              security.tearing_flag === 0xbd
+                ? t("readCard.tearingOk", { hex: security.tearing_flag.toString(16).toUpperCase().padStart(2, "0") })
+                : t("readCard.tearingDetected", { hex: security.tearing_flag.toString(16).toUpperCase().padStart(2, "0") })
             }
           />
         )}

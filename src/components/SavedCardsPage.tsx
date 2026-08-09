@@ -3,6 +3,8 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { deleteSavedCard, loadSavedCards, type SavedCard } from "@/lib/savedCards";
 import { recordsToDrafts, type RecordDraft } from "@/lib/writeRecords";
+import { exportCardAsText } from "@/lib/exportCard";
+import { logFrontend } from "@/lib/devLog";
 import { formatUid } from "./CardInfoDisplay";
 import { NdefRecordList } from "./NdefRecordList";
 
@@ -28,6 +30,9 @@ export function SavedCardsPage({
   const { t } = useI18n();
   const [cards, setCards] = useState<SavedCard[]>(() => loadSavedCards());
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  // Keyed by card id — same brief-feedback-then-revert idea as the read page's export button,
+  // just per-row since this is a list instead of a single card.
+  const [exportFeedback, setExportFeedback] = useState<Record<string, "done" | "error" | undefined>>({});
 
   // Saving happens on a completely different page visit, so there's no live-update channel to
   // subscribe to — just re-read from storage every time this page is (re)entered.
@@ -39,6 +44,24 @@ export function SavedCardsPage({
     deleteSavedCard(id);
     setCards((prev) => prev.filter((c) => c.id !== id));
     if (expandedId === id) setExpandedId(null);
+  }
+
+  async function handleExport(c: SavedCard) {
+    try {
+      const didExport = await exportCardAsText({
+        uid: c.uid,
+        ndefMessageHex: c.ndefMessageHex,
+        ndefRecords: c.ndefRecords,
+      });
+      if (!didExport) return; // User cancelled the save dialog.
+      logFrontend("info", `Exported saved card ${c.uid}'s NDEF data to a text file`);
+      setExportFeedback((prev) => ({ ...prev, [c.id]: "done" }));
+    } catch (e) {
+      logFrontend("error", `Failed to export saved card data: ${String(e)}`);
+      setExportFeedback((prev) => ({ ...prev, [c.id]: "error" }));
+    } finally {
+      setTimeout(() => setExportFeedback((prev) => ({ ...prev, [c.id]: undefined })), 2000);
+    }
   }
 
   if (cards.length === 0) {
@@ -77,6 +100,16 @@ export function SavedCardsPage({
                 onClick={() => onWrite(recordsToDrafts(c.ndefRecords))}
               >
                 {t("savedCards.write")}
+              </button>
+              <button
+                className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted"
+                onClick={() => handleExport(c)}
+              >
+                {exportFeedback[c.id] === "done"
+                  ? t("common.exported")
+                  : exportFeedback[c.id] === "error"
+                    ? t("common.exportFailed")
+                    : t("common.export")}
               </button>
               <button
                 className="rounded-md border px-2.5 py-1 text-xs text-destructive hover:bg-destructive/10"

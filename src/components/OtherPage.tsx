@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { ChevronLeft, Eraser, KeyRound, Save, type LucideIcon } from "lucide-react";
+import { ChevronLeft, Eraser, KeyRound, Save, Archive, type LucideIcon } from "lucide-react";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
 import type { CardInfo } from "@/lib/pn532Types";
 import type { RecordDraft } from "@/lib/writeRecords";
 import { PasswordToolPage } from "./PasswordToolPage";
 import { SavedCardsPage } from "./SavedCardsPage";
+import { SavedTagsPage } from "./SavedTagsPage";
 import { TagToolPage } from "./TagToolPage";
 
 interface ToolDef {
@@ -28,6 +29,12 @@ const TOOLS: ToolDef[] = [
     icon: Save,
     titleKey: "other.toolSavedTitle",
     descriptionKey: "other.toolSavedDesc",
+  },
+  {
+    id: "savedTags",
+    icon: Archive,
+    titleKey: "other.toolSavedTagsTitle",
+    descriptionKey: "other.toolSavedTagsDesc",
   },
   {
     id: "tag",
@@ -70,7 +77,7 @@ export function OtherPage({
     // The saved-data list wants the full content width for its rows; the password tool is just
     // a short form and reads better kept narrow and centered like the rest of the app's forms.
     const wrapperClass =
-      selectedTool === "saved"
+      selectedTool === "saved" || selectedTool === "savedTags"
         ? "flex w-full flex-col gap-3"
         : "mx-auto flex max-w-lg flex-col gap-3";
     return (
@@ -93,6 +100,7 @@ export function OtherPage({
           />
         )}
         {selectedTool === "saved" && <SavedCardsPage onWrite={onWriteRecords} />}
+        {selectedTool === "savedTags" && <SavedTagsPage onWrite={onWriteRecords} />}
         {selectedTool === "tag" && (
           <TagToolPage
             connectedPort={connectedPort}

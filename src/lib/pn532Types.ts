@@ -53,6 +53,13 @@ export interface PasswordProtection {
   auth0: number;
 }
 
+export interface NtagSecurityData {
+  version_hex: string;
+  signature_hex?: string;
+  counter?: number;
+  tearing_flag?: number;
+}
+
 export interface MemoryDump {
   uid: string;
   card_type: string;
@@ -68,6 +75,7 @@ export interface MemoryDump {
   ndef_message_hex?: string;
   ndef_records: NdefRecordInfo[];
   password_protection?: PasswordProtection;
+  security?: NtagSecurityData;
 }
 
 export interface ClassicBlock {
