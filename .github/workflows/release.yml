@@ -47,6 +47,7 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libdbus-1-dev \
+            libudev-dev \
             pkg-config
 
       - name: Install pnpm
