@@ -2,6 +2,7 @@
   "name": "pnfc-toolkit",
   "description": "A cross-platform NFC reader/writer toolkit — currently built for the PN532 module; support for other NFC controller chips (e.g. PN7160) may be added in the future.",
   "private": true,
+  "license": "MIT",
   "version": "0.1.0",
   "type": "module",
   "packageManager": "pnpm@11.17.0",
