@@ -13,6 +13,10 @@ interface ToolDef {
   icon: LucideIcon;
   titleKey: TranslationKey;
   descriptionKey: TranslationKey;
+  /** Password tool and tag management both talk to the reader directly, so there's nothing they
+   * can do without a connected device. The saved-data browsers are pure local storage reads —
+   * no device involved — so they stay available even when nothing's connected. */
+  requiresDevice: boolean;
 }
 
 // The list of standalone card-operation tools that live under "Other" — grows over time without
@@ -23,24 +27,28 @@ const TOOLS: ToolDef[] = [
     icon: KeyRound,
     titleKey: "other.toolPasswordTitle",
     descriptionKey: "other.toolPasswordDesc",
+    requiresDevice: true,
   },
   {
     id: "saved",
     icon: Save,
     titleKey: "other.toolSavedTitle",
     descriptionKey: "other.toolSavedDesc",
+    requiresDevice: false,
   },
   {
     id: "savedTags",
     icon: Archive,
     titleKey: "other.toolSavedTagsTitle",
     descriptionKey: "other.toolSavedTagsDesc",
+    requiresDevice: false,
   },
   {
     id: "tag",
     icon: Eraser,
     titleKey: "other.toolTagTitle",
     descriptionKey: "other.toolTagDesc",
+    requiresDevice: true,
   },
 ];
 
@@ -121,11 +129,18 @@ export function OtherPage({
       <div className="flex flex-col gap-2">
         {TOOLS.map((tool) => {
           const Icon = tool.icon;
+          const disabled = tool.requiresDevice && !connectedPort;
           return (
             <button
               key={tool.id}
-              className="flex items-start gap-3 rounded-md border p-3 text-left hover:bg-muted"
-              onClick={() => setSelectedTool(tool.id)}
+              className={
+                disabled
+                  ? "flex cursor-not-allowed items-start gap-3 rounded-md border p-3 text-left opacity-50"
+                  : "flex items-start gap-3 rounded-md border p-3 text-left hover:bg-muted"
+              }
+              onClick={() => !disabled && setSelectedTool(tool.id)}
+              disabled={disabled}
+              title={disabled ? t("readCard.connectFirst") : undefined}
             >
               <Icon className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
               <div>
