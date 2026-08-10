@@ -2,38 +2,41 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { logFrontend } from "@/lib/devLog";
 import { useI18n } from "@/lib/i18n";
-import { cardFamily, isValidPasswordHex, type CardInfo } from "@/lib/pn532Types";
+import { cardFamily, isValidPasswordHex, textToHexPassword, type CardInfo } from "@/lib/pn532Types";
+import { Switch } from "@/components/ui/switch";
 
 type Action = "set" | "clear";
-type Phase = "config" | "waiting" | "processing" | "done";
+// idle: config is being edited, nothing waiting — same shape as WritePage's phases, so a batch
+// of cards can be worked through the same way (arm once, keep acting on every new card until
+// stopped) instead of needing an explicit "start over" click after each one.
+type Phase = "idle" | "waiting";
 type PwMode = "text" | "hex";
+
+interface PwdLogEntry {
+  id: number;
+  uid: string;
+  ok: boolean;
+  message: string;
+  time: string;
+}
+
+let nextLogId = 1;
 
 const inputClass =
   "rounded-md border bg-background px-3 py-1.5 text-sm font-mono disabled:opacity-50";
-
-/** UTF-8 encodes the text, then truncates to the first 4 bytes (or zero-pads up to 4 if
- * shorter) — NTAG's write password is always exactly 4 bytes, there's no other way to fit an
- * arbitrary text password into it. */
-function textToHexPassword(text: string): string {
-  const bytes = new TextEncoder().encode(text);
-  const padded = new Uint8Array(4);
-  padded.set(bytes.subarray(0, 4));
-  return Array.from(padded)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")
-    .toUpperCase();
-}
 
 /**
  * A quick, standalone way to set or remove NTAG/Ultralight write-password protection without
  * first doing a full card read — this is the only password management UI in the app (the read
  * page used to have its own embedded version, but that duplicated this and needed a full dump
  * first just to get started, so it was removed in favor of this one). Picks the password up
- * front, then arms a single-shot wait for a card: as soon as one shows up,
- * `set_ntag_password`/`clear_ntag_password` are called directly. Both of those already check the
- * card is Ultralight/NTAG family and that its exact model can be identified via GET_VERSION
- * before touching anything (see `select_ntag_for_password_op` in session.rs) — no need to
- * duplicate that check here, an unsupported card just surfaces as a normal error.
+ * front, then arms a wait for a card: as soon as one shows up, `set_ntag_password`/
+ * `clear_ntag_password` are called directly. In continuous mode it stays armed afterward,
+ * acting on every new card placed until stopped — same "swap card, keep going" shape as
+ * `WritePage`'s continuous mode. Both password commands already check the card is
+ * Ultralight/NTAG family and that its exact model can be identified via GET_VERSION before
+ * touching anything (see `select_ntag_for_password_op` in session.rs) — no need to duplicate
+ * that check here, an unsupported card just surfaces as a normal error.
  */
 export function PasswordToolPage({
   connectedPort,
@@ -52,11 +55,13 @@ export function PasswordToolPage({
 }) {
   const { t } = useI18n();
   const [action, setAction] = useState<Action | null>(null);
-  const [phase, setPhase] = useState<Phase>("config");
+  const [phase, setPhase] = useState<Phase>("idle");
   const [pwMode, setPwMode] = useState<PwMode>("text");
   const [pwInput, setPwInput] = useState("");
-  const [result, setResult] = useState<{ ok: boolean; message: string; uid: string } | null>(null);
-  // The detectionSeq baseline as of the last time waiting started — see the comment in
+  const [continuous, setContinuous] = useState(false);
+  const [busyUid, setBusyUid] = useState<string | null>(null);
+  const [log, setLog] = useState<PwdLogEntry[]>([]);
+  // The detectionSeq baseline as of the last time waiting (re)started — see the comment in
   // `startWaiting` for why this is the current seq at that moment, not a fixed sentinel like 0.
   const armedSeqRef = useRef(0);
   const busyRef = useRef(false);
@@ -77,58 +82,70 @@ export function PasswordToolPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, card, detectionSeq]);
 
-  // A disconnect mid-wait has nothing left to operate on; go back to the config screen instead
-  // of leaving the UI stuck waiting for a card that can never show up.
+  // A disconnect mid-wait has nothing left to operate on; go back to editing instead of leaving
+  // the UI stuck waiting for a card that can never show up.
   useEffect(() => {
-    if (!connectedPort) reset();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!connectedPort) setPhase("idle");
   }, [connectedPort]);
+
+  function appendLog(uid: string, ok: boolean, message: string) {
+    setLog((prev) =>
+      [{ id: nextLogId++, uid, ok, message, time: new Date().toLocaleTimeString() }, ...prev].slice(
+        0,
+        100,
+      ),
+    );
+  }
 
   async function process(target: CardInfo) {
     busyRef.current = true;
-    setPhase("processing");
-    const family = cardFamily(target.sel_res);
-    if (family !== "ntag") {
-      const message = family === "classic" ? t("pwdTool.classicNotSupported") : t("pwdTool.unsupportedModel");
-      setResult({ ok: false, message, uid: target.uid });
-      setPhase("done");
-      busyRef.current = false;
-      return;
-    }
-    setPollingPaused(true);
+    setBusyUid(target.uid);
     try {
-      if (action === "set") {
-        await invoke("set_ntag_password", {
-          expectedUid: target.uid,
-          currentPassword: null,
-          newPassword: hexPassword,
-        });
-        logFrontend("info", `${target.uid} password set via the quick password tool`);
-        setResult({ ok: true, message: t("pwdTool.setSuccess"), uid: target.uid });
-      } else {
-        await invoke("clear_ntag_password", {
-          expectedUid: target.uid,
-          currentPassword: hexPassword,
-        });
-        logFrontend("info", `${target.uid} password removed via the quick password tool`);
-        setResult({ ok: true, message: t("pwdTool.clearSuccess"), uid: target.uid });
+      const family = cardFamily(target.sel_res);
+      if (family !== "ntag") {
+        appendLog(
+          target.uid,
+          false,
+          family === "classic" ? t("pwdTool.classicNotSupported") : t("pwdTool.unsupportedModel"),
+        );
+        return;
+      }
+      setPollingPaused(true);
+      try {
+        if (action === "set") {
+          await invoke("set_ntag_password", {
+            expectedUid: target.uid,
+            currentPassword: null,
+            newPassword: hexPassword,
+          });
+          logFrontend("info", `${target.uid} password set via the quick password tool`);
+          appendLog(target.uid, true, t("pwdTool.setSuccess"));
+        } else {
+          await invoke("clear_ntag_password", {
+            expectedUid: target.uid,
+            currentPassword: hexPassword,
+          });
+          logFrontend("info", `${target.uid} password removed via the quick password tool`);
+          appendLog(target.uid, true, t("pwdTool.clearSuccess"));
+        }
+      } finally {
+        setPollingPaused(false);
       }
     } catch (e) {
-      setResult({ ok: false, message: String(e), uid: target.uid });
+      appendLog(target.uid, false, String(e));
       logFrontend("error", `Quick password tool failed: ${String(e)}`);
     } finally {
-      setPollingPaused(false);
-      setPhase("done");
       busyRef.current = false;
+      setBusyUid(null);
+      if (!continuous) setPhase("idle");
     }
   }
 
   function startWaiting(a: Action) {
     if (!hexValid) return;
     setAction(a);
-    setResult(null);
     // Baseline = the current seq, not 0 — `card`/`detectionSeq` can be stale left over from
-    // before polling was off (e.g. a previous attempt dropped back to config, and the card was
+    // before polling was off (e.g. a previous attempt dropped back to idle, and the card was
     // then removed with nobody polling to notice), so trusting them directly here risked
     // immediately acting on a card that isn't there anymore. The poller resets its own presence
     // tracking on resume (see `usePn532Connection`), guaranteeing the first tick after this is a
@@ -138,11 +155,8 @@ export function PasswordToolPage({
     setPhase("waiting");
   }
 
-  function reset() {
-    setAction(null);
-    setResult(null);
-    setPwInput("");
-    setPhase("config");
+  function stopWaiting() {
+    setPhase("idle");
   }
 
   if (!connectedPort) {
@@ -153,58 +167,39 @@ export function PasswordToolPage({
     );
   }
 
-  if (phase === "waiting") {
-    return (
-      <div className="mx-auto flex max-w-lg flex-col items-center gap-4">
-        <p className="text-center text-sm text-muted-foreground">
-          {action === "set" ? t("pwdTool.waitingToSet") : t("pwdTool.waitingToClear")}
-        </p>
-        <button className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted" onClick={reset}>
-          {t("common.cancel")}
-        </button>
-      </div>
-    );
-  }
-
-  if (phase === "processing") {
-    return (
-      <div className="mx-auto flex max-w-lg flex-col items-center gap-4">
-        <p className="text-center text-sm text-muted-foreground">{t("common.processing")}</p>
-      </div>
-    );
-  }
-
-  if (phase === "done") {
-    return (
-      <div className="mx-auto flex max-w-lg flex-col items-center gap-4">
-        <p className={`text-center text-sm ${result?.ok ? "text-green-600" : "text-destructive"}`}>
-          {result?.message}
-          {result && <span className="ml-1 font-mono text-xs text-muted-foreground">({result.uid})</span>}
-        </p>
-        <button
-          className="rounded-md border bg-secondary px-4 py-2 text-sm font-medium hover:bg-muted"
-          onClick={reset}
-        >
-          {t("pwdTool.startOver")}
-        </button>
-      </div>
-    );
-  }
+  const locked = phase === "waiting";
 
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-3">
+      {phase === "waiting" && (
+        <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-1.5 text-sm">
+          <span className="flex-1 text-muted-foreground">
+            {busyUid
+              ? t("pwdTool.processingUid", { uid: busyUid })
+              : action === "set"
+                ? t("pwdTool.waitingToSet")
+                : t("pwdTool.waitingToClear")}
+          </span>
+          <button className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted" onClick={stopWaiting}>
+            {continuous ? t("pwdTool.stop") : t("common.cancel")}
+          </button>
+        </div>
+      )}
+
       <p className="text-sm text-muted-foreground">{t("pwdTool.intro")}</p>
 
       <div className="flex gap-2">
         <button
-          className={`rounded-md border px-3 py-1.5 text-sm ${pwMode === "text" ? "bg-accent font-medium" : "hover:bg-muted"}`}
+          className={`rounded-md border px-3 py-1.5 text-sm disabled:opacity-50 ${pwMode === "text" ? "bg-accent font-medium" : "hover:bg-muted"}`}
           onClick={() => setPwMode("text")}
+          disabled={locked}
         >
           {t("pwdTool.modeText")}
         </button>
         <button
-          className={`rounded-md border px-3 py-1.5 text-sm ${pwMode === "hex" ? "bg-accent font-medium" : "hover:bg-muted"}`}
+          className={`rounded-md border px-3 py-1.5 text-sm disabled:opacity-50 ${pwMode === "hex" ? "bg-accent font-medium" : "hover:bg-muted"}`}
           onClick={() => setPwMode("hex")}
+          disabled={locked}
         >
           {t("pwdTool.modeHex")}
         </button>
@@ -215,6 +210,7 @@ export function PasswordToolPage({
         placeholder={pwMode === "text" ? t("pwdTool.textPlaceholder") : t("pwdTool.hexPlaceholder")}
         value={pwInput}
         onChange={(e) => setPwInput(e.target.value)}
+        disabled={locked}
         autoFocus
       />
 
@@ -223,22 +219,66 @@ export function PasswordToolPage({
       </p>
       {pwMode === "text" && <p className="text-xs text-muted-foreground">{t("pwdTool.truncateHint")}</p>}
 
-      <div className="mt-2 flex gap-2">
-        <button
-          className="flex-1 rounded-md border bg-secondary px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
-          onClick={() => startWaiting("set")}
-          disabled={!hexValid}
-        >
-          {t("pwdTool.setAndWait")}
-        </button>
-        <button
-          className="flex-1 rounded-md border px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50"
-          onClick={() => startWaiting("clear")}
-          disabled={!hexValid}
-        >
-          {t("pwdTool.clearAndWait")}
-        </button>
-      </div>
+      {/* A settings toggle, not an action button — flipping it doesn't do anything by itself, it
+          only decides whether the buttons below re-arm for the next card instead of stopping
+          after one. */}
+      <label className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+        <span className="flex flex-col">
+          <span className="text-sm font-medium">
+            {continuous ? t("pwdTool.modeContinuous") : t("pwdTool.modeSingle")}
+          </span>
+          <span className="text-xs text-muted-foreground">{t("pwdTool.modeLabel")}</span>
+        </span>
+        <Switch checked={continuous} onCheckedChange={setContinuous} disabled={locked} />
+      </label>
+
+      {phase === "idle" && (
+        <div className="flex gap-2">
+          <button
+            className="flex-1 rounded-md border bg-secondary px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
+            onClick={() => startWaiting("set")}
+            disabled={!hexValid}
+          >
+            {t("pwdTool.setAndWait")}
+          </button>
+          <button
+            className="flex-1 rounded-md border px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50"
+            onClick={() => startWaiting("clear")}
+            disabled={!hexValid}
+          >
+            {t("pwdTool.clearAndWait")}
+          </button>
+        </div>
+      )}
+
+      {log.length > 0 && (
+        <div className="flex flex-col gap-1 rounded-md border p-2 text-xs">
+          <div className="flex items-center justify-between px-1 pb-1 text-muted-foreground">
+            <span>
+              {t("pwdTool.successCount", { count: log.filter((e) => e.ok).length })}
+              {" · "}
+              {t("pwdTool.errorCount", { count: log.filter((e) => !e.ok).length })}
+            </span>
+            <button className="hover:underline" onClick={() => setLog([])}>
+              {t("pwdTool.clearLog")}
+            </button>
+          </div>
+          <div className="flex max-h-56 flex-col gap-1 overflow-auto">
+            {log.map((entry) => (
+              <div
+                key={entry.id}
+                className={`flex items-center gap-2 rounded px-1.5 py-1 ${
+                  entry.ok ? "text-green-600" : "text-destructive"
+                }`}
+              >
+                <span className="font-mono">{entry.uid}</span>
+                <span className="flex-1">{entry.message}</span>
+                <span className="text-muted-foreground">{entry.time}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

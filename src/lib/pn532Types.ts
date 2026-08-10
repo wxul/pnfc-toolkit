@@ -150,3 +150,17 @@ export function manufacturerFromUid(uid: string): string | undefined {
 export function isValidPasswordHex(s: string): boolean {
   return /^[0-9a-fA-F]{8}$/.test(s.trim());
 }
+
+/** UTF-8 encodes the text, then truncates to the first 4 bytes (or zero-pads up to 4 if
+ * shorter) — NTAG's write password is always exactly 4 bytes, there's no other way to fit an
+ * arbitrary text password into it. Used everywhere a password field offers a "text" mode
+ * alongside raw hex, so text entered on one page maps to the same bytes on any other. */
+export function textToHexPassword(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  const padded = new Uint8Array(4);
+  padded.set(bytes.subarray(0, 4));
+  return Array.from(padded)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .toUpperCase();
+}

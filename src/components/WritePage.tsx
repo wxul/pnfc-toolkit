@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { logFrontend } from "@/lib/devLog";
 import { useI18n } from "@/lib/i18n";
-import { cardFamily, isValidPasswordHex, type CardInfo, type PasswordProtection } from "@/lib/pn532Types";
+import {
+  cardFamily,
+  isValidPasswordHex,
+  textToHexPassword,
+  type CardInfo,
+  type PasswordProtection,
+} from "@/lib/pn532Types";
 import { Switch } from "@/components/ui/switch";
 import { buildVCard, type VCardFields } from "@/lib/vcard";
 import {
@@ -179,6 +185,7 @@ interface WriteLogEntry {
 // card (writes once, then drops back to idle); in continuous mode it stays armed indefinitely,
 // writing to every card placed until "stop" is clicked.
 type Phase = "idle" | "waiting";
+type PwMode = "text" | "hex";
 
 export function WritePage({
   connectedPort,
@@ -212,7 +219,10 @@ export function WritePage({
   const [drafts, setDrafts] = useState<RecordDraft[]>(() => initialDrafts ?? [newDraft()]);
   const [continuous, setContinuous] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
+  const [pwMode, setPwMode] = useState<PwMode>("text");
   const [password, setPassword] = useState("");
+  const hexPassword = pwMode === "hex" ? password.trim().toUpperCase() : textToHexPassword(password);
+  const passwordValid = pwMode === "hex" ? isValidPasswordHex(hexPassword) : password.length > 0;
   const [busyUid, setBusyUid] = useState<string | null>(null);
   const [log, setLog] = useState<WriteLogEntry[]>([]);
   // The detectionSeq baseline as of the last time waiting started — see the comment in
@@ -275,11 +285,11 @@ export function WritePage({
         return;
       }
       if (protectionInfo?.enabled) {
-        if (!isValidPasswordHex(password)) {
+        if (!passwordValid) {
           appendLog(target.uid, false, t("write.passwordRequired"));
           return;
         }
-        pwd = password.trim();
+        pwd = hexPassword;
       }
       const records = drafts.map((d) => ({ kind: d.kind, content: buildContent(d.kind, d.fields) }));
       logFrontend("info", `Writing ${records.length} record(s) to ${target.uid}`);
@@ -416,13 +426,41 @@ export function WritePage({
         <Switch checked={continuous} onCheckedChange={setContinuous} disabled={locked} />
       </label>
 
-      <input
-        className="rounded-md border bg-background px-3 py-1.5 text-sm font-mono disabled:opacity-50"
-        placeholder={t("write.sharedPasswordPlaceholder")}
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        disabled={locked}
-      />
+      <div className="flex flex-col gap-2 rounded-md border p-3">
+        <div className="flex gap-2">
+          <button
+            type="button"
+            className={`rounded-md border px-3 py-1.5 text-sm disabled:opacity-50 ${pwMode === "text" ? "bg-accent font-medium" : "hover:bg-muted"}`}
+            onClick={() => setPwMode("text")}
+            disabled={locked}
+          >
+            {t("write.passwordModeText")}
+          </button>
+          <button
+            type="button"
+            className={`rounded-md border px-3 py-1.5 text-sm disabled:opacity-50 ${pwMode === "hex" ? "bg-accent font-medium" : "hover:bg-muted"}`}
+            onClick={() => setPwMode("hex")}
+            disabled={locked}
+          >
+            {t("write.passwordModeHex")}
+          </button>
+        </div>
+        <input
+          className="rounded-md border bg-background px-3 py-1.5 text-sm font-mono disabled:opacity-50"
+          placeholder={pwMode === "text" ? t("write.passwordTextPlaceholder") : t("write.passwordHexPlaceholder")}
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          disabled={locked}
+        />
+        <p className="text-xs text-muted-foreground">
+          {t("write.passwordPreviewLabel")}:{" "}
+          <span className="font-mono">{passwordValid ? hexPassword : "—"}</span>
+        </p>
+        {pwMode === "text" && (
+          <p className="text-xs text-muted-foreground">{t("write.passwordTruncateHint")}</p>
+        )}
+        <p className="text-xs text-muted-foreground">{t("write.passwordScopeHint")}</p>
+      </div>
 
       {phase === "idle" && (
         <button
