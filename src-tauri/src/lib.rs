@@ -336,6 +336,34 @@ async fn write_binary_file(path: String, content: Vec<u8>) -> Result<(), String>
         .map_err(|e| e.to_string())
 }
 
+/// The Windows portable zip (see `.github/workflows/release.yml`) is the exact same
+/// `pnfc-toolkit.exe` as the NSIS-installed one, just zipped up alone with nothing else next to
+/// it — so there's no build-time flag to check. `tauri-plugin-updater`'s install step for NSIS
+/// downloads and silently runs the installer as a separate process, which installs a *second*
+/// copy under the NSIS install directory and never touches whichever exe the user actually
+/// double-clicked; for someone running the portable build, that means the copy they're running
+/// never changes no matter how many times they "update" it.
+///
+/// Detect that case by checking for the `uninstall.exe` Tauri's NSIS bundler always writes next
+/// to the installed exe (`WriteUninstaller "$INSTDIR\uninstall.exe"`) — its absence means this
+/// binary is running loose from wherever the zip was extracted, not from an NSIS install
+/// directory, and the frontend should point the user at a manual download instead of offering
+/// the in-app installer.
+#[tauri::command]
+fn is_portable_install() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|dir| !dir.join("uninstall.exe").exists()))
+            .unwrap_or(false)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -343,6 +371,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(
             tauri_plugin_log::Builder::new()
                 // The Webview target forwards log records to the frontend via events, for the
@@ -379,7 +408,8 @@ pub fn run() {
             read_classic_sector,
             copy_classic_card,
             write_text_file,
-            write_binary_file
+            write_binary_file,
+            is_portable_install
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

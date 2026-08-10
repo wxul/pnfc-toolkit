@@ -34,16 +34,16 @@ export function SavedTagsPage({
   onWrite: (drafts: RecordDraft[]) => void;
 }) {
   const { t } = useI18n();
-  const [tags, setTags] = useState<SavedTag[]>(() => loadSavedTags());
+  const [tags, setTags] = useState<SavedTag[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [exportFeedback, setExportFeedback] = useState<Record<string, ExportFeedback>>({});
 
   useEffect(() => {
-    setTags(loadSavedTags());
+    loadSavedTags().then(setTags);
   }, []);
 
-  function handleDelete(id: string) {
-    deleteSavedTag(id);
+  async function handleDelete(id: string) {
+    await deleteSavedTag(id);
     setTags((prev) => prev.filter((tg) => tg.id !== id));
     if (expandedId === id) setExpandedId(null);
   }

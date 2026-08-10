@@ -188,9 +188,9 @@ export function ReadCardPage({
   // for it yet) — only keeps the formatted NDEF data (records + the raw message hex), not the
   // rest of the read, so it can be browsed later from Other -> Saved data without needing the
   // card again.
-  function handleSaveData() {
+  async function handleSaveData() {
     if (!activeCard || !dump) return;
-    saveCard({
+    await saveCard({
       uid: activeCard.uid,
       ndefMessageHex: dump.ndef_message_hex,
       ndefRecords: dump.ndef_records,
@@ -203,9 +203,9 @@ export function ReadCardPage({
   // Unlike `handleSaveData`, keeps the complete dump (every page, plus signature/counter data)
   // so a saved entry can later be re-exported as Flipper `.nfc`/raw `.bin`, not just text — see
   // `SavedTagsPage`.
-  function handleSaveTag() {
+  async function handleSaveTag() {
     if (!activeCard || !dump) return;
-    saveTag({
+    await saveTag({
       uid: activeCard.uid,
       sensRes: activeCard.sens_res,
       selRes: activeCard.sel_res,

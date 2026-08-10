@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { invoke } from "@tauri-apps/api/core";
 import { logFrontend } from "@/lib/devLog";
 
 export type UpdateCheckState =
@@ -17,6 +18,10 @@ export type UpdateCheckState =
  */
 export function useUpdateCheck() {
   const [state, setState] = useState<UpdateCheckState>({ phase: "checking" });
+  // The Windows portable zip (a loose, un-installed .exe) can't be updated by the in-app
+  // installer flow — see `is_portable_install` in `lib.rs` for why. When true, the UI should
+  // offer a manual download link instead of an "install and restart" button.
+  const [isPortable, setIsPortable] = useState(false);
 
   const recheck = useCallback(async () => {
     setState({ phase: "checking" });
@@ -31,6 +36,7 @@ export function useUpdateCheck() {
   }, []);
 
   useEffect(() => {
+    invoke<boolean>("is_portable_install").then(setIsPortable).catch(() => {});
     recheck();
   }, [recheck]);
 
@@ -45,7 +51,7 @@ export function useUpdateCheck() {
     }
   }
 
-  return { state, recheck, install };
+  return { state, recheck, install, isPortable };
 }
 
 export type UseUpdateCheck = ReturnType<typeof useUpdateCheck>;

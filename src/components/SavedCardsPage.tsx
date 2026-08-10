@@ -28,7 +28,7 @@ export function SavedCardsPage({
   onWrite: (drafts: RecordDraft[]) => void;
 }) {
   const { t } = useI18n();
-  const [cards, setCards] = useState<SavedCard[]>(() => loadSavedCards());
+  const [cards, setCards] = useState<SavedCard[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   // Keyed by card id — same brief-feedback-then-revert idea as the read page's export button,
   // just per-row since this is a list instead of a single card.
@@ -37,11 +37,11 @@ export function SavedCardsPage({
   // Saving happens on a completely different page visit, so there's no live-update channel to
   // subscribe to — just re-read from storage every time this page is (re)entered.
   useEffect(() => {
-    setCards(loadSavedCards());
+    loadSavedCards().then(setCards);
   }, []);
 
-  function handleDelete(id: string) {
-    deleteSavedCard(id);
+  async function handleDelete(id: string) {
+    await deleteSavedCard(id);
     setCards((prev) => prev.filter((c) => c.id !== id));
     if (expandedId === id) setExpandedId(null);
   }

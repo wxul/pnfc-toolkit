@@ -288,6 +288,9 @@ const en = {
   "about.downloading": "Downloading update...",
   "about.updateError": "Failed to check for updates",
   "about.recheckUpdate": "Check again",
+  "about.portableUpdateAvailable": (p) =>
+    `New version available: ${p.version} — the portable build doesn't support in-app updates, please download it manually.`,
+  "about.openReleasePage": "Open the releases page",
 } satisfies Record<string, Entry>;
 
 export type TranslationKey = keyof typeof en;
@@ -555,6 +558,8 @@ const zh: Record<TranslationKey, Entry> = {
   "about.downloading": "正在下载更新...",
   "about.updateError": "检查更新失败",
   "about.recheckUpdate": "重新检查",
+  "about.portableUpdateAvailable": (p) => `发现新版本：${p.version} —— 免安装版不支持应用内自动更新，请手动下载新版本。`,
+  "about.openReleasePage": "打开下载页",
 };
 
 const dictionaries: Record<Locale, Record<TranslationKey, Entry>> = { en, zh };
