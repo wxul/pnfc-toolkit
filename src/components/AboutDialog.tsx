@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getName, getTauriVersion, getVersion } from "@tauri-apps/api/app";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useI18n } from "@/lib/i18n";
 import type { UseUpdateCheck } from "@/hooks/useUpdateCheck";
 import "./AboutDialog.css";
@@ -9,6 +10,8 @@ interface AppInfo {
   version: string;
   tauriVersion: string;
 }
+
+const RELEASES_URL = "https://github.com/wxul/pnfc-toolkit/releases/latest";
 
 export function AboutDialog({
   onClose,
@@ -22,7 +25,7 @@ export function AboutDialog({
 }) {
   const { t } = useI18n();
   const [info, setInfo] = useState<AppInfo | null>(null);
-  const { state: updateState, recheck, install } = updateCheck;
+  const { state: updateState, recheck, install, isPortable } = updateCheck;
 
   useEffect(() => {
     Promise.all([getName(), getVersion(), getTauriVersion()]).then(
@@ -64,7 +67,17 @@ export function AboutDialog({
               </button>
             </>
           )}
-          {updateState.phase === "available" && (
+          {updateState.phase === "available" && isPortable && (
+            <>
+              <p className="about-update-status">
+                {t("about.portableUpdateAvailable", { version: updateState.update.version })}
+              </p>
+              <button className="about-update-btn" onClick={() => openUrl(RELEASES_URL)}>
+                {t("about.openReleasePage")}
+              </button>
+            </>
+          )}
+          {updateState.phase === "available" && !isPortable && (
             <>
               <p className="about-update-status">
                 {t("about.updateAvailable", { version: updateState.update.version })}
