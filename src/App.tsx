@@ -47,7 +47,11 @@ function App() {
     { id: "device", label: t("nav.device"), icon: Cable },
     { id: "read", label: t("nav.read"), icon: CreditCard, disabled: !conn.connectedPort },
     { id: "write", label: t("nav.write"), icon: Pencil, disabled: !conn.connectedPort },
-    { id: "other", label: t("nav.other"), icon: KeyRound, disabled: !conn.connectedPort },
+    // Not gated on `connectedPort` — unlike "read"/"write", most of what lives under "other" is
+    // pure local browsing (saved cards/tags) that doesn't touch the reader at all. The two
+    // sub-tools that do need hardware (password tool, tag management) are gated individually
+    // inside `OtherPage` instead of blocking the whole tab.
+    { id: "other", label: t("nav.other"), icon: KeyRound },
     // "Settings" is temporarily hidden (the page itself, and the "settings" branch below, are
     // both still here — this entry can be added back at any time).
   ];
