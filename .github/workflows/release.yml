@@ -9,8 +9,41 @@ permissions:
   contents: write
 
 jobs:
+  # Runs once, before the matrix build below. tauri-action can create-or-find a release by tag
+  # name on its own, but that lookup isn't atomic: with four matrix jobs (windows/macos/linux
+  # x64/linux arm64) all starting at once and each independently checking "does a release for
+  # this tag exist yet", more than one of them can see "no" before any of the others has
+  # finished creating one, so each of the racing jobs creates its own separate draft release for
+  # the same tag — exactly what happened for v0.1.3, split into a Windows-only draft and a
+  # macOS+Linux draft. Creating the (single) release here, once, up front, and having every
+  # matrix job upload into that specific release by ID instead, removes the race entirely.
+  create-release:
+    name: Create draft release
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.create-release.outputs.result }}
+    steps:
+      - name: Create draft release
+        id: create-release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tagName = context.ref.replace("refs/tags/", "");
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tagName,
+              name: `pnfc-toolkit ${tagName}`,
+              draft: true,
+              prerelease: false,
+            });
+            return data.id;
+
   release:
     name: Build (${{ matrix.platform }})
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
@@ -73,20 +106,18 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      # Builds the app and creates/updates a **draft** GitHub Release with the installers
-      # attached — it never gets published automatically, a maintainer still has to review it
+      # Builds the app and uploads the installers as assets on the **draft** release
+      # `create-release` made above (identified by ID, not by tag name — see that job's comment
+      # for why) — it never gets published automatically, a maintainer still has to review it
       # and hit "Publish" by hand.
-      - name: Build the app and draft a release
+      - name: Build the app and upload to the draft release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "pnfc-toolkit ${{ github.ref_name }}"
-          releaseDraft: true
-          prerelease: false
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           includeUpdaterJson: true
           args: ${{ matrix.args }}
 
