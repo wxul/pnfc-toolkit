@@ -324,26 +324,47 @@ fn wsc_tlv(attr_id: u16, value: &[u8]) -> Vec<u8> {
     out
 }
 
-/// A Wi-Fi Simple Configuration record (MIME type "application/vnd.wfa.wsc"), fixed to
-/// WPA2-Personal + AES (the default config for the vast majority of home routers today). The
-/// attribute IDs and the overall Credential wrapper structure match wpa_supplicant's
-/// wps_defs.h reference implementation, and also match real captured bytes from ndeflib's test
-/// cases — not guessed:
+/// WPS AuthType/EncryptionType flag values (WSC 2.0 spec) for the handful of security modes
+/// exposed in the write UI — everything else in the spec (WPA/WPA2 mixed mode, enterprise auth,
+/// ...) is left out rather than guessed at without a device to confirm against.
+fn wps_security_flags(security: &str) -> (u16, u16) {
+    const WPS_AUTH_OPEN: u16 = 0x0001;
+    const WPS_AUTH_WPAPSK: u16 = 0x0002;
+    const WPS_AUTH_SHARED: u16 = 0x0004; // WEP
+    const WPS_AUTH_WPA2PSK: u16 = 0x0020;
+    const WPS_ENCR_NONE: u16 = 0x0001;
+    const WPS_ENCR_WEP: u16 = 0x0002;
+    const WPS_ENCR_TKIP: u16 = 0x0004;
+    const WPS_ENCR_AES: u16 = 0x0008;
+
+    match security {
+        "open" => (WPS_AUTH_OPEN, WPS_ENCR_NONE),
+        "wep" => (WPS_AUTH_SHARED, WPS_ENCR_WEP),
+        "wpa" => (WPS_AUTH_WPAPSK, WPS_ENCR_TKIP),
+        // "wpa2" and anything unrecognized (e.g. an older saved draft with no security field)
+        // fall back to the previous fixed behavior.
+        _ => (WPS_AUTH_WPA2PSK, WPS_ENCR_AES),
+    }
+}
+
+/// A Wi-Fi Simple Configuration record (MIME type "application/vnd.wfa.wsc"). The attribute IDs
+/// and the overall Credential wrapper structure match wpa_supplicant's wps_defs.h reference
+/// implementation, and also match real captured bytes from ndeflib's test cases — not guessed:
 /// Credential=0x100E wraps AuthType=0x1003 / EncType=0x100F / SSID=0x1045 / NetworkKey=0x1027.
 /// The MAC address and network index fields are optional and skipped here — saves effort and
 /// doesn't affect whether phones recognize it.
-pub fn wifi_record(ssid: &str, password: &str) -> RecordSpec {
+pub fn wifi_record(ssid: &str, password: &str, security: &str) -> RecordSpec {
     const ATTR_CREDENTIAL: u16 = 0x100E;
     const ATTR_AUTH_TYPE: u16 = 0x1003;
     const ATTR_ENCR_TYPE: u16 = 0x100F;
     const ATTR_NETWORK_KEY: u16 = 0x1027;
     const ATTR_SSID: u16 = 0x1045;
-    const WPS_AUTH_WPA2PSK: u16 = 0x0020;
-    const WPS_ENCR_AES: u16 = 0x0008;
+
+    let (auth_type, enc_type) = wps_security_flags(security);
 
     let mut credential = Vec::new();
-    credential.extend(wsc_tlv(ATTR_AUTH_TYPE, &WPS_AUTH_WPA2PSK.to_be_bytes()));
-    credential.extend(wsc_tlv(ATTR_ENCR_TYPE, &WPS_ENCR_AES.to_be_bytes()));
+    credential.extend(wsc_tlv(ATTR_AUTH_TYPE, &auth_type.to_be_bytes()));
+    credential.extend(wsc_tlv(ATTR_ENCR_TYPE, &enc_type.to_be_bytes()));
     credential.extend(wsc_tlv(ATTR_SSID, ssid.as_bytes()));
     credential.extend(wsc_tlv(ATTR_NETWORK_KEY, password.as_bytes()));
 
@@ -354,12 +375,29 @@ pub fn wifi_record(ssid: &str, password: &str) -> RecordSpec {
     }
 }
 
+/// A fully user-specified record — the escape hatch for whatever the named kinds above don't
+/// cover (a record type this app has no dedicated editor for, or one that doesn't exist yet).
+/// Unlike every other builder here, there's no validation that `tnf`/`type_str`/`payload`
+/// actually form something meaningful together (e.g. TNF=Empty with a non-empty type, or
+/// TNF=Well-Known Type="U" with a payload that isn't a valid URI record body) — this is the
+/// "you know what you're doing" path, so it just writes exactly what it's given.
+pub fn custom_record(tnf: u8, type_str: &str, payload: Vec<u8>) -> Result<RecordSpec, String> {
+    if tnf > 0x06 {
+        return Err(format!("Invalid TNF {tnf:#04x}: must be 0x00-0x06"));
+    }
+    Ok(RecordSpec {
+        tnf,
+        type_bytes: type_str.as_bytes().to_vec(),
+        payload,
+    })
+}
+
 /// Build a record from a type name and some content. tel/sms/mailto/geo are all essentially
 /// URI records with an extra scheme prefix, so they just reuse [`uri_record`] instead of
-/// getting their own implementations. wifi needs both an SSID and a password — rather than
-/// define a separate request struct for every kind, the frontend joins those two fields as
-/// "ssid\npassword" and this splits them back apart; a normal SSID/password won't actually
-/// contain a newline.
+/// getting their own implementations. wifi needs an SSID, a password, and a security mode —
+/// rather than define a separate request struct for every kind, the frontend joins those three
+/// fields as "ssid\npassword\nsecurity" and this splits them back apart; a normal SSID/password
+/// won't actually contain a newline.
 pub fn record_for(kind: &str, content: &str) -> Result<RecordSpec, String> {
     match kind {
         "url" => Ok(uri_record(content)),
@@ -370,8 +408,29 @@ pub fn record_for(kind: &str, content: &str) -> Result<RecordSpec, String> {
         "geo" => Ok(uri_record(&format!("geo:{content}"))),
         "vcard" => Ok(vcard_record(content)),
         "wifi" => {
-            let (ssid, password) = content.split_once('\n').unwrap_or((content, ""));
-            Ok(wifi_record(ssid, password))
+            let mut parts = content.splitn(3, '\n');
+            let ssid = parts.next().unwrap_or("");
+            let password = parts.next().unwrap_or("");
+            let security = parts.next().unwrap_or("wpa2");
+            Ok(wifi_record(ssid, password, security))
+        }
+        "raw" => {
+            // "tnf\ntype\npayload_hex" — the frontend's raw-record editor always sends the
+            // payload as hex (even when the user typed plain text, it's UTF-8-encoded to hex
+            // first) so there's no ambiguity about what bytes a literal "\n" in the payload
+            // would mean; type_str, not being hex, is sent as-is and can't itself contain a
+            // newline (it's a single-line input in the UI).
+            let mut parts = content.splitn(3, '\n');
+            let tnf_str = parts.next().unwrap_or("");
+            let type_str = parts.next().unwrap_or("");
+            let payload_hex = parts.next().unwrap_or("");
+            let tnf: u8 = tnf_str
+                .trim()
+                .parse()
+                .map_err(|_| format!("Invalid TNF: {tnf_str}"))?;
+            let payload = hex::decode(payload_hex.trim())
+                .map_err(|e| format!("Invalid payload hex: {e}"))?;
+            custom_record(tnf, type_str, payload)
         }
         other => Err(format!("Unknown write type: {other}")),
     }
@@ -430,7 +489,7 @@ mod tests {
 
     #[test]
     fn wifi_record_matches_reference_attribute_layout() {
-        let spec = wifi_record("abcdefghij", "1234567890");
+        let spec = wifi_record("abcdefghij", "1234567890", "wpa2");
         // Cross-checked against wpa_supplicant's wps_defs.h and real captured-packet
         // structure from ndeflib's test cases: Credential(0x100E) wraps four sub-attributes,
         // AuthType/EncType/SSID/NetworkKey.
@@ -440,5 +499,37 @@ mod tests {
         assert!(spec.payload.windows(2).any(|w| w == 0x100F_u16.to_be_bytes()));
         assert!(spec.payload.windows(2).any(|w| w == 0x1045_u16.to_be_bytes()));
         assert!(spec.payload.windows(2).any(|w| w == 0x1027_u16.to_be_bytes()));
+    }
+
+    #[test]
+    fn wifi_record_security_modes_map_to_expected_wps_flags() {
+        assert_eq!(wps_security_flags("open"), (0x0001, 0x0001));
+        assert_eq!(wps_security_flags("wep"), (0x0004, 0x0002));
+        assert_eq!(wps_security_flags("wpa"), (0x0002, 0x0004));
+        assert_eq!(wps_security_flags("wpa2"), (0x0020, 0x0008));
+        assert_eq!(wps_security_flags("anything-else"), (0x0020, 0x0008));
+    }
+
+    #[test]
+    fn custom_record_writes_exactly_what_it_is_given() {
+        let spec = custom_record(0x04, "example.com:widget", vec![0xDE, 0xAD, 0xBE, 0xEF]).unwrap();
+        assert_eq!(spec.tnf, 0x04);
+        assert_eq!(spec.type_bytes, b"example.com:widget");
+        assert_eq!(spec.payload, vec![0xDE, 0xAD, 0xBE, 0xEF]);
+    }
+
+    #[test]
+    fn custom_record_rejects_tnf_outside_the_valid_range() {
+        assert!(custom_record(0x07, "x", vec![]).is_err());
+    }
+
+    #[test]
+    fn record_for_raw_round_trips_through_the_message() {
+        let spec = record_for("raw", "1\nT\n48656C6C6F").unwrap();
+        assert_eq!(spec.tnf, 0x01);
+        assert_eq!(spec.type_bytes, b"T");
+        let message = build_message(&[spec]);
+        let records = parse_ndef_message(&message);
+        assert_eq!(records[0].payload_hex, "48656C6C6F");
     }
 }
