@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { ChevronDown, ChevronRight, Loader2, LocateFixed } from "lucide-react";
 import { logFrontend } from "@/lib/devLog";
 import { useI18n } from "@/lib/i18n";
 import {
@@ -10,10 +11,13 @@ import {
   type PasswordProtection,
 } from "@/lib/pn532Types";
 import { Switch } from "@/components/ui/switch";
+import { DEFAULT_SOCIAL_PLATFORM, SOCIAL_PLATFORMS, socialPlatform } from "@/lib/socialPlatforms";
 import { buildVCard, type VCardFields } from "@/lib/vcard";
 import {
+  backendKind,
   buildContent,
   isDraftFilled,
+  isValidHex,
   KIND_LABEL_KEYS,
   newDraft,
   type RecordDraft,
@@ -30,27 +34,59 @@ function RecordFields({
   onChange: (field: string, value: string) => void;
 }) {
   const { t } = useI18n();
+  const [locating, setLocating] = useState(false);
+  const [geoError, setGeoError] = useState<string | null>(null);
   const inputClass =
     "rounded-md border bg-background px-3 py-1.5 text-sm disabled:opacity-50";
+
+  async function locateCurrentPosition() {
+    setGeoError(null);
+    setLocating(true);
+    try {
+      const pos = await invoke<{ lat: number; lng: number }>("get_current_location");
+      onChange("lat", String(pos.lat));
+      onChange("lng", String(pos.lng));
+    } catch (e) {
+      setGeoError(String(e));
+    } finally {
+      setLocating(false);
+    }
+  }
 
   switch (draft.kind) {
     case "geo":
       return (
-        <div className="flex gap-2">
-          <input
-            className={`${inputClass} flex-1`}
-            placeholder={t("write.latPlaceholder")}
-            value={draft.fields.lat ?? ""}
-            onChange={(e) => onChange("lat", e.target.value)}
-            disabled={disabled}
-          />
-          <input
-            className={`${inputClass} flex-1`}
-            placeholder={t("write.lngPlaceholder")}
-            value={draft.fields.lng ?? ""}
-            onChange={(e) => onChange("lng", e.target.value)}
-            disabled={disabled}
-          />
+        <div className="flex flex-col gap-1">
+          <div className="flex gap-2">
+            <input
+              className={`${inputClass} flex-1`}
+              placeholder={t("write.latPlaceholder")}
+              value={draft.fields.lat ?? ""}
+              onChange={(e) => onChange("lat", e.target.value)}
+              disabled={disabled}
+            />
+            <input
+              className={`${inputClass} flex-1`}
+              placeholder={t("write.lngPlaceholder")}
+              value={draft.fields.lng ?? ""}
+              onChange={(e) => onChange("lng", e.target.value)}
+              disabled={disabled}
+            />
+            <button
+              type="button"
+              className="flex items-center justify-center rounded-md border px-2.5 hover:bg-muted disabled:opacity-50"
+              onClick={locateCurrentPosition}
+              disabled={disabled || locating}
+              title={t("write.geoUseCurrentLocation")}
+            >
+              {locating ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <LocateFixed className="h-4 w-4" />
+              )}
+            </button>
+          </div>
+          {geoError && <p className="text-xs text-destructive">{geoError}</p>}
         </div>
       );
     case "vcard": {
@@ -102,45 +138,213 @@ function RecordFields({
             <div className="grid grid-cols-2 gap-2">
               {f("familyName", t("write.vcardFamilyName"))}
               {f("givenName", t("write.vcardGivenName"))}
-              {f("nickname", t("write.vcardNickname"))}
               {f("org", t("write.vcardOrg"))}
               {f("title", t("write.vcardTitle"))}
-              {f("role", t("write.vcardRole"))}
               {f("phone", t("write.vcardPhone"))}
               {f("email", t("write.vcardEmail"))}
               {f("url", t("write.vcardUrl"), true)}
-              {f("adrStreet", t("write.vcardAdrStreet"), true)}
-              {f("adrCity", t("write.vcardAdrCity"))}
-              {f("adrState", t("write.vcardAdrState"))}
-              {f("adrPostalCode", t("write.vcardAdrPostalCode"))}
-              {f("adrCountry", t("write.vcardAdrCountry"))}
-              {f("label", t("write.vcardLabel"), true)}
               {f("note", t("write.vcardNote"), true)}
-              {f("photo", t("write.vcardPhoto"), true)}
-              {f("logo", t("write.vcardLogo"), true)}
-              {f("bday", t("write.vcardBday"))}
-              {f("anniversary", t("write.vcardAnniversary"))}
-              {f("categories", t("write.vcardCategories"), true)}
             </div>
           )}
         </div>
       );
     }
-    case "wifi":
+    case "wifi": {
+      const security = draft.fields.security ?? "wpa2";
+      const isOpen = security === "open";
       return (
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2">
+          <div className="flex gap-2">
+            <input
+              className={`${inputClass} flex-1`}
+              placeholder={t("write.wifiSsid")}
+              value={draft.fields.ssid ?? ""}
+              onChange={(e) => onChange("ssid", e.target.value)}
+              disabled={disabled}
+            />
+            <select
+              className="rounded-md border bg-background px-2 py-1.5 text-sm disabled:opacity-50"
+              value={security}
+              onChange={(e) => onChange("security", e.target.value)}
+              disabled={disabled}
+            >
+              <option value="wpa2">{t("write.wifiSecurityWpa2")}</option>
+              <option value="wpa">{t("write.wifiSecurityWpa")}</option>
+              <option value="wep">{t("write.wifiSecurityWep")}</option>
+              <option value="open">{t("write.wifiSecurityOpen")}</option>
+            </select>
+          </div>
           <input
-            className={`${inputClass} flex-1`}
-            placeholder={t("write.wifiSsid")}
-            value={draft.fields.ssid ?? ""}
-            onChange={(e) => onChange("ssid", e.target.value)}
-            disabled={disabled}
-          />
-          <input
-            className={`${inputClass} flex-1`}
+            className={inputClass}
             placeholder={t("write.wifiPassword")}
             value={draft.fields.password ?? ""}
             onChange={(e) => onChange("password", e.target.value)}
+            disabled={disabled || isOpen}
+          />
+        </div>
+      );
+    }
+    case "social": {
+      const platformId = draft.fields.platform ?? DEFAULT_SOCIAL_PLATFORM;
+      const handle = draft.fields.handle ?? "";
+      const trimmedHandle = handle.trim();
+      const preview = trimmedHandle ? socialPlatform(platformId).buildUrl(handle) : "";
+      const isPlainText = trimmedHandle !== "" && !/^[a-z][a-z0-9+.-]*:/i.test(preview);
+      return (
+        <div className="flex flex-col gap-2">
+          <div className="flex gap-2">
+            <select
+              className="rounded-md border bg-background px-2 py-1.5 text-sm disabled:opacity-50"
+              value={platformId}
+              onChange={(e) => onChange("platform", e.target.value)}
+              disabled={disabled}
+            >
+              {SOCIAL_PLATFORMS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <input
+              className={`${inputClass} flex-1`}
+              placeholder={t("write.socialHandlePlaceholder")}
+              value={handle}
+              onChange={(e) => onChange("handle", e.target.value)}
+              disabled={disabled}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {t("write.socialPreviewLabel")}: <span className="font-mono">{preview || "—"}</span>
+          </p>
+          {isPlainText && (
+            <p className="text-xs text-muted-foreground">{t("write.socialPlainTextNote")}</p>
+          )}
+        </div>
+      );
+    }
+    case "raw": {
+      const tnf = draft.fields.tnf ?? "1";
+      const payloadMode = draft.fields.payloadMode === "hex" ? "hex" : "text";
+      const payloadHex = draft.fields.payloadHex ?? "";
+      const hexInvalid = payloadMode === "hex" && payloadHex.trim() !== "" && !isValidHex(payloadHex);
+      return (
+        <div className="flex flex-col gap-2">
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+            {t("write.rawHint")}
+          </div>
+          <div className="flex min-w-0 gap-2">
+            <select
+              className="w-44 shrink-0 truncate rounded-md border bg-background px-2 py-1.5 text-sm disabled:opacity-50"
+              value={tnf}
+              onChange={(e) => onChange("tnf", e.target.value)}
+              disabled={disabled}
+            >
+              <option value="0">{t("write.rawTnf0")}</option>
+              <option value="1">{t("write.rawTnf1")}</option>
+              <option value="2">{t("write.rawTnf2")}</option>
+              <option value="3">{t("write.rawTnf3")}</option>
+              <option value="4">{t("write.rawTnf4")}</option>
+              <option value="5">{t("write.rawTnf5")}</option>
+              <option value="6">{t("write.rawTnf6")}</option>
+            </select>
+            <input
+              className={`${inputClass} min-w-0 flex-1`}
+              placeholder={t("write.rawTypePlaceholder")}
+              value={draft.fields.type ?? ""}
+              onChange={(e) => onChange("type", e.target.value)}
+              disabled={disabled}
+            />
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className={`rounded-md border px-3 py-1.5 text-sm disabled:opacity-50 ${payloadMode === "text" ? "bg-accent font-medium" : "hover:bg-muted"}`}
+              onClick={() => onChange("payloadMode", "text")}
+              disabled={disabled}
+            >
+              {t("write.passwordModeText")}
+            </button>
+            <button
+              type="button"
+              className={`rounded-md border px-3 py-1.5 text-sm disabled:opacity-50 ${payloadMode === "hex" ? "bg-accent font-medium" : "hover:bg-muted"}`}
+              onClick={() => onChange("payloadMode", "hex")}
+              disabled={disabled}
+            >
+              {t("write.passwordModeHex")}
+            </button>
+          </div>
+          {payloadMode === "hex" ? (
+            <textarea
+              className={`${inputClass} min-h-[100px] resize-y font-mono`}
+              placeholder={t("write.rawPayloadHexPlaceholder")}
+              value={payloadHex}
+              onChange={(e) => onChange("payloadHex", e.target.value)}
+              disabled={disabled}
+            />
+          ) : (
+            <textarea
+              className={`${inputClass} min-h-[100px] resize-y`}
+              placeholder={t("write.rawPayloadTextPlaceholder")}
+              value={draft.fields.payloadText ?? ""}
+              onChange={(e) => onChange("payloadText", e.target.value)}
+              disabled={disabled}
+            />
+          )}
+          {hexInvalid && <p className="text-xs text-destructive">{t("write.rawPayloadHexInvalid")}</p>}
+        </div>
+      );
+    }
+    case "text":
+      return (
+        <textarea
+          className={`${inputClass} min-h-[120px] resize-y`}
+          placeholder={t("write.textPlaceholder")}
+          value={draft.fields.value ?? ""}
+          onChange={(e) => onChange("value", e.target.value)}
+          disabled={disabled}
+        />
+      );
+    case "sms":
+      return (
+        <div className="flex flex-col gap-2">
+          <input
+            className={inputClass}
+            placeholder={t("write.smsToPlaceholder")}
+            value={draft.fields.to ?? ""}
+            onChange={(e) => onChange("to", e.target.value)}
+            disabled={disabled}
+          />
+          <textarea
+            className={`${inputClass} min-h-[100px] resize-y`}
+            placeholder={t("write.smsBodyPlaceholder")}
+            value={draft.fields.body ?? ""}
+            onChange={(e) => onChange("body", e.target.value)}
+            disabled={disabled}
+          />
+        </div>
+      );
+    case "mailto":
+      return (
+        <div className="flex flex-col gap-2">
+          <input
+            className={inputClass}
+            placeholder={t("write.mailtoToPlaceholder")}
+            value={draft.fields.to ?? ""}
+            onChange={(e) => onChange("to", e.target.value)}
+            disabled={disabled}
+          />
+          <input
+            className={inputClass}
+            placeholder={t("write.mailtoSubjectPlaceholder")}
+            value={draft.fields.subject ?? ""}
+            onChange={(e) => onChange("subject", e.target.value)}
+            disabled={disabled}
+          />
+          <textarea
+            className={`${inputClass} min-h-[100px] resize-y`}
+            placeholder={t("write.mailtoBodyPlaceholder")}
+            value={draft.fields.body ?? ""}
+            onChange={(e) => onChange("body", e.target.value)}
             disabled={disabled}
           />
         </div>
@@ -149,13 +353,7 @@ function RecordFields({
       const placeholder =
         draft.kind === "url"
           ? t("write.urlPlaceholder")
-          : draft.kind === "tel"
-            ? t("write.telPlaceholder")
-            : draft.kind === "sms"
-              ? t("write.telPlaceholder")
-              : draft.kind === "mailto"
-                ? "someone@example.com"
-                : t("write.textPlaceholder");
+          : t("write.telPlaceholder");
       return (
         <input
           className={inputClass}
@@ -218,6 +416,7 @@ export function WritePage({
   const { t } = useI18n();
   const [drafts, setDrafts] = useState<RecordDraft[]>(() => initialDrafts ?? [newDraft()]);
   const [continuous, setContinuous] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [pwMode, setPwMode] = useState<PwMode>("text");
   const [password, setPassword] = useState("");
@@ -291,7 +490,10 @@ export function WritePage({
         }
         pwd = hexPassword;
       }
-      const records = drafts.map((d) => ({ kind: d.kind, content: buildContent(d.kind, d.fields) }));
+      const records = drafts.map((d) => {
+        const content = buildContent(d.kind, d.fields);
+        return { kind: backendKind(d.kind, content), content };
+      });
       logFrontend("info", `Writing ${records.length} record(s) to ${target.uid}`);
       await invoke("write_ndef", { records, expectedUid: target.uid, password: pwd });
       appendLog(target.uid, true, t("write.writeSuccess"));
@@ -412,54 +614,72 @@ export function WritePage({
         {t("write.addRecord")}
       </button>
 
-      {/* A settings toggle, not an action button — flipping it doesn't do anything by itself, it
-          only decides what the "write" button below will do once clicked. Labeling both states
-          explicitly (rather than just "continuous: on/off") keeps it readable without having to
-          infer what the current position means. */}
-      <label className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
-        <span className="flex flex-col">
-          <span className="text-sm font-medium">
-            {continuous ? t("write.modeContinuous") : t("write.modeSingle")}
-          </span>
-          <span className="text-xs text-muted-foreground">{t("write.modeLabel")}</span>
-        </span>
-        <Switch checked={continuous} onCheckedChange={setContinuous} disabled={locked} />
-      </label>
+      <div className="rounded-md border">
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium hover:bg-muted"
+          onClick={() => setAdvancedOpen((v) => !v)}
+        >
+          {advancedOpen ? (
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+          )}
+          {t("write.advancedSettings")}
+        </button>
+        {advancedOpen && (
+          <div className="flex flex-col gap-3 border-t p-3">
+            {/* A settings toggle, not an action button — flipping it doesn't do anything by
+                itself, it only decides what the "write" button below will do once clicked.
+                Labeling both states explicitly (rather than just "continuous: on/off") keeps it
+                readable without having to infer what the current position means. */}
+            <label className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+              <span className="flex flex-col">
+                <span className="text-sm font-medium">
+                  {continuous ? t("write.modeContinuous") : t("write.modeSingle")}
+                </span>
+                <span className="text-xs text-muted-foreground">{t("write.modeLabel")}</span>
+              </span>
+              <Switch checked={continuous} onCheckedChange={setContinuous} disabled={locked} />
+            </label>
 
-      <div className="flex flex-col gap-2 rounded-md border p-3">
-        <div className="flex gap-2">
-          <button
-            type="button"
-            className={`rounded-md border px-3 py-1.5 text-sm disabled:opacity-50 ${pwMode === "text" ? "bg-accent font-medium" : "hover:bg-muted"}`}
-            onClick={() => setPwMode("text")}
-            disabled={locked}
-          >
-            {t("write.passwordModeText")}
-          </button>
-          <button
-            type="button"
-            className={`rounded-md border px-3 py-1.5 text-sm disabled:opacity-50 ${pwMode === "hex" ? "bg-accent font-medium" : "hover:bg-muted"}`}
-            onClick={() => setPwMode("hex")}
-            disabled={locked}
-          >
-            {t("write.passwordModeHex")}
-          </button>
-        </div>
-        <input
-          className="rounded-md border bg-background px-3 py-1.5 text-sm font-mono disabled:opacity-50"
-          placeholder={pwMode === "text" ? t("write.passwordTextPlaceholder") : t("write.passwordHexPlaceholder")}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          disabled={locked}
-        />
-        <p className="text-xs text-muted-foreground">
-          {t("write.passwordPreviewLabel")}:{" "}
-          <span className="font-mono">{passwordValid ? hexPassword : "—"}</span>
-        </p>
-        {pwMode === "text" && (
-          <p className="text-xs text-muted-foreground">{t("write.passwordTruncateHint")}</p>
+            <div className="flex flex-col gap-2 rounded-md border p-3">
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className={`rounded-md border px-3 py-1.5 text-sm disabled:opacity-50 ${pwMode === "text" ? "bg-accent font-medium" : "hover:bg-muted"}`}
+                  onClick={() => setPwMode("text")}
+                  disabled={locked}
+                >
+                  {t("write.passwordModeText")}
+                </button>
+                <button
+                  type="button"
+                  className={`rounded-md border px-3 py-1.5 text-sm disabled:opacity-50 ${pwMode === "hex" ? "bg-accent font-medium" : "hover:bg-muted"}`}
+                  onClick={() => setPwMode("hex")}
+                  disabled={locked}
+                >
+                  {t("write.passwordModeHex")}
+                </button>
+              </div>
+              <input
+                className="rounded-md border bg-background px-3 py-1.5 text-sm font-mono disabled:opacity-50"
+                placeholder={pwMode === "text" ? t("write.passwordTextPlaceholder") : t("write.passwordHexPlaceholder")}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={locked}
+              />
+              <p className="text-xs text-muted-foreground">
+                {t("write.passwordPreviewLabel")}:{" "}
+                <span className="font-mono">{passwordValid ? hexPassword : "—"}</span>
+              </p>
+              {pwMode === "text" && (
+                <p className="text-xs text-muted-foreground">{t("write.passwordTruncateHint")}</p>
+              )}
+              <p className="text-xs text-muted-foreground">{t("write.passwordScopeHint")}</p>
+            </div>
+          </div>
         )}
-        <p className="text-xs text-muted-foreground">{t("write.passwordScopeHint")}</p>
       </div>
 
       {phase === "idle" && (

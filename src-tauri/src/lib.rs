@@ -1,3 +1,4 @@
+mod geolocation;
 mod pn532;
 
 use pn532::session::{CardInfo, SessionSlot};
@@ -336,6 +337,25 @@ async fn write_binary_file(path: String, content: Vec<u8>) -> Result<(), String>
         .map_err(|e| e.to_string())
 }
 
+#[derive(serde::Serialize)]
+struct GeoPosition {
+    lat: f64,
+    lng: f64,
+}
+
+/// Native "use current location" for the write page's geo record editor — see
+/// `geolocation.rs` for why this goes through the OS instead of the browser's Geolocation API.
+/// Not wrapped in `run_blocking`/`COMMAND_TIMEOUT`: unlike the serial port commands, waiting on
+/// this is normal (first use waits on the user answering Windows' location-consent prompt),
+/// so it shouldn't be cut short by an 8-second timeout meant for a wedged serial port.
+#[tauri::command]
+async fn get_current_location(app: tauri::AppHandle) -> Result<GeoPosition, String> {
+    tauri::async_runtime::spawn_blocking(move || geolocation::current_location(&app))
+        .await
+        .map_err(|e| e.to_string())?
+        .map(|(lat, lng)| GeoPosition { lat, lng })
+}
+
 /// The Windows portable zip (see `.github/workflows/release.yml`) is the exact same
 /// `pnfc-toolkit.exe` as the NSIS-installed one, just zipped up alone with nothing else next to
 /// it — so there's no build-time flag to check. `tauri-plugin-updater`'s install step for NSIS
@@ -409,6 +429,7 @@ pub fn run() {
             copy_classic_card,
             write_text_file,
             write_binary_file,
+            get_current_location,
             is_portable_install
         ])
         .run(tauri::generate_context!())
